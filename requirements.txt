@@ -3,3 +3,10 @@ Pillow
 requests
 selenium
 opencv-python
+deathbycaptcha #pip install git+https://github.com/codevance/python-deathbycaptcha.git
+
+
+# TRaining AI
+paddlepaddle
+paddleocr
+sklearn

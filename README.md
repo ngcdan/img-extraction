@@ -26,3 +26,11 @@ Dự án trích xuất thông tin từ file PDF theo mẫu chung bằng Layout-P
 - [Tesseract Installation](https://tesseract-ocr.github.io/tessdoc/Installation.html)
 ```
 
+# Cài đặt paddlepaddle (CPU version)
+python -m pip install paddlepaddle
+
+# Cài đặt paddleocr và các dependencies
+pip install "paddleocr>=2.0.1"
+pip install shapely pyclipper opencv-python
+
+pip install tensorflow pillow numpy scikit-learn

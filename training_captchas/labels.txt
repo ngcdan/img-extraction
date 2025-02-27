@@ -24,3 +24,5 @@ captcha_22.png	ELNFA
 captcha_23.png	ZMBZZ
 captcha_24.png	RFACS
 captcha_25.png	BUNMT
+captcha_26.png	HZMVS
+captcha_27.png	EKLVD

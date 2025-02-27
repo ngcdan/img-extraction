@@ -7,6 +7,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 import time
+import os
+import platform
+import subprocess
+import threading
+from selenium.webdriver.chrome.options import Options
 
 from fetch_bien_lai import get_chrome_driver, fill_login_info, navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
 
@@ -29,6 +34,63 @@ download_status = {
     'failed': 0,
     'status': 'idle'  # idle, running, completed, error
 }
+
+def initialize_chrome():
+    """Khởi tạo Chrome và mở trang web"""
+    global driver
+    try:
+        print("Đang khởi tạo Chrome driver...")
+
+        # Xác định đường dẫn profile mặc định của Chrome
+        if platform.system() == 'Windows':
+            default_profile = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
+        else:  # macOS
+            default_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
+
+        # Khởi động Chrome với profile mặc định và debug port
+        if platform.system() == 'Windows':
+            chrome_path = 'C:\\Program Files\\Google Chrome\\chrome.exe'
+            if not os.path.exists(chrome_path):
+                chrome_path = 'C:\\Program Files (x86)\\Google Chrome\\chrome.exe'
+        else:  # macOS
+            chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+
+        # Khởi động Chrome với các tham số
+        subprocess.Popen([
+            chrome_path,
+            f'--user-data-dir={default_profile}',
+            '--remote-debugging-port=9222',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--start-maximized',
+            'http://localhost:8080'  # Mở trực tiếp trang web của app
+        ])
+
+        print("Đang đợi Chrome khởi động...")
+        time.sleep(3)
+
+        # Kết nối với Chrome đang chạy
+        chrome_options = Options()
+        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+        driver = webdriver.Chrome(options=chrome_options)
+
+        print("Đã kết nối với Chrome thành công")
+
+        # Mở trang đăng nhập trong tab mới
+        driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
+        time.sleep(1)
+        driver.switch_to.window(driver.window_handles[-1])
+
+        # Đợi trang load xong
+        WebDriverWait(driver, 20).until(
+            EC.presence_of_element_located((By.TAG_NAME, "body"))
+        )
+        print("Đã mở trang đăng nhập thành công")
+        return True
+
+    except Exception as e:
+        print(f"Lỗi khi khởi tạo Chrome và mở web: {e}")
+        return False
 
 def process_download(username, so_tk=None):
     global driver, download_status
@@ -108,10 +170,13 @@ def process_download(username, so_tk=None):
                 time.sleep(1)
 
         download_status['status'] = 'completed'
+        # Đóng các tab không cần thiết
+        close_specific_tabs("thuphi.haiphong.gov.vn:8222")
 
     except Exception as e:
         download_status['status'] = 'error'
         print(f"Lỗi: {str(e)}")
+        close_specific_tabs("thuphi.haiphong.gov.vn:8222")
 
 @app.route('/')
 def index():
@@ -155,5 +220,74 @@ def start_download():
 def get_status():
     return jsonify(download_status)
 
+def close_specific_tabs(url_pattern):
+    """Đóng các tab có địa chỉ chứa url_pattern"""
+    global driver
+    if not driver:
+        return
+
+    try:
+        # Lưu lại handle của tab hiện tại
+        current_handle = driver.current_window_handle
+
+        # Lấy tất cả các handle
+        handles = driver.window_handles
+
+        # Duyệt qua từng handle và đóng tab phù hợp
+        for handle in handles[:]:  # Tạo bản sao của list để tránh lỗi khi xóa phần tử
+            try:
+                driver.switch_to.window(handle)
+                if url_pattern in driver.current_url:
+                    print(f"Đóng tab: {driver.current_url}")
+                    driver.close()
+            except:
+                continue
+
+        # Kiểm tra xem còn tab nào không
+        remaining_handles = driver.window_handles
+        if remaining_handles:
+            # Chuyển về tab đầu tiên nếu tab hiện tại đã bị đóng
+            if current_handle not in remaining_handles:
+                driver.switch_to.window(remaining_handles[0])
+
+    except Exception as e:
+        print(f"Lỗi khi đóng tab: {e}")
+
+def cleanup():
+    """Dọn dẹp tài nguyên khi tắt app"""
+    global driver
+    if driver:
+        try:
+            # Đóng các tab cụ thể trước
+            close_specific_tabs("thuphi.haiphong.gov.vn:8222")
+            # Đóng Chrome driver
+            driver.quit()
+        except:
+            pass
+        driver = None
+
+def open_browser():
+    """Mở trình duyệt mặc định với trang web của app"""
+    import webbrowser
+    webbrowser.open('http://localhost:8080')
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    try:
+        # Khởi tạo Chrome trong thread riêng
+        chrome_thread = threading.Thread(target=initialize_chrome)
+        chrome_thread.daemon = True
+        chrome_thread.start()
+
+        # Đăng ký hàm cleanup khi tắt app
+        import atexit
+        atexit.register(cleanup)
+
+        # Mở trình duyệt sau 2 giây
+        threading.Timer(2.0, open_browser).start()
+
+        # Chạy Flask app
+        app.run(host='0.0.0.0', port=8080, debug=False)  # Tắt debug mode
+
+    except Exception as e:
+        print(f"Lỗi khi khởi động app: {e}")
+        cleanup()

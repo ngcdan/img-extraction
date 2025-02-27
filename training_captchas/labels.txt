@@ -26,3 +26,15 @@ captcha_24.png	RFACS
 captcha_25.png	BUNMT
 captcha_26.png	HZMVS
 captcha_27.png	EKLVD
+captcha_28.png	UCKVE
+captcha_29.png	VFRHS
+captcha_30.png	UCYUT
+captcha_31.png	RJWEE
+captcha_32.png	DGHLU
+captcha_33.png	JNTMJ
+captcha_34.png	TAHGW
+captcha_35.png	NIVFW
+captcha_36.png	QKVIF
+captcha_37.png	VLTKM
+captcha_38.png	AZQBV
+captcha_39.png	GPGJK

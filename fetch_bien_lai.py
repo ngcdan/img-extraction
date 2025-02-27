@@ -18,55 +18,78 @@ USERNAME = "0104232742"
 PASSWORD = "0104232742"
 
 def is_chrome_running_with_debug():
+    """Kiểm tra xem Chrome có đang chạy với debug port không"""
     try:
         response = requests.get('http://127.0.0.1:9222/json/version')
         return response.status_code == 200
     except:
         return False
 
-def start_chrome_with_debug():
-    chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-    user_data_dir = os.path.expanduser('~/chrome-debug-profile')
+def get_chrome_driver():
+    """Khởi tạo hoặc kết nối với Chrome driver"""
 
+    # Kiểm tra xem Chrome có đang chạy với debug port không
+    if is_chrome_running_with_debug():
+        print("Tìm thấy Chrome đang chạy với debug port, đang kết nối...")
+        chrome_options = Options()
+        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            print("Đã kết nối thành công với Chrome đang chạy")
+            return driver
+        except Exception as e:
+            print(f"Không thể kết nối với Chrome đang chạy: {e}")
+
+    print("Không tìm thấy Chrome với debug port, khởi động Chrome mới...")
+
+    # Xác định đường dẫn Chrome
+    if platform.system() == 'Windows':
+        chrome_path = 'C:\\Program Files\\Google Chrome\\chrome.exe'
+        if not os.path.exists(chrome_path):
+            chrome_path = 'C:\\Program Files (x86)\\Google Chrome\\chrome.exe'
+    else:  # macOS
+        chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+
+    # Tạo thư mục profile
+    user_data_dir = os.path.expanduser('~/chrome-debug-profile')
     if not os.path.exists(user_data_dir):
         os.makedirs(user_data_dir)
 
-    try:
+    # Đóng tất cả các tiến trình Chrome hiện tại
+    if platform.system() == 'Windows':
+        os.system('taskkill /f /im chrome.exe')
+    else:
         os.system("pkill -f 'Google Chrome'")
-        time.sleep(1)
+    time.sleep(2)
 
+    # Khởi động Chrome với debug port
+    try:
         subprocess.Popen([
             chrome_path,
             f'--user-data-dir={user_data_dir}',
             '--remote-debugging-port=9222',
             '--no-first-run',
             '--no-default-browser-check',
+            '--start-maximized',
+            '--disable-gpu',
+            '--disable-dev-shm-usage',
+            '--disable-plugins',
+            '--disable-extensions',
+            '--disable-default-apps',
             'about:blank'
         ])
+        print("Đã khởi động Chrome với debug port")
+        time.sleep(3)  # Đợi Chrome khởi động
 
-        time.sleep(3)
-        return True
-    except Exception as e:
-        print(f"Lỗi khi khởi động Chrome: {e}")
-        return False
-
-def get_chrome_driver():
-    if not is_chrome_running_with_debug():
-        print("Khởi động Chrome với debug mode...")
-        if not start_chrome_with_debug():
-            print("Không thể khởi động Chrome debug mode")
-            return None
-
-    print("Kết nối vào Chrome debug mode...")
-    chrome_options = Options()
-    chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-
-    try:
+        # Kết nối với Chrome vừa khởi động
+        chrome_options = Options()
+        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
         driver = webdriver.Chrome(options=chrome_options)
-        print("Đã kết nối thành công vào Chrome")
+        print("Đã kết nối thành công với Chrome")
         return driver
+
     except Exception as e:
-        print(f"Lỗi khi kết nối Chrome: {e}")
+        print(f"Lỗi khi khởi động và kết nối Chrome: {e}")
         return None
 
 def get_login_credentials():

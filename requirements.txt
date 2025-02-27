@@ -2,3 +2,4 @@ pytesseract
 Pillow
 requests
 selenium
+opencv-python

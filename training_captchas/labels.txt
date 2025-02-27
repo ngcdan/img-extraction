@@ -17,3 +17,9 @@ captcha_15.png	ASGYG
 captcha_16.png	QKQVA
 captcha_17.png	MYLPS
 captcha_18.png	MGWRB
+captcha_19.png	FVCHC
+captcha_20.png	SYPHB
+captcha_21.png	VKMGU
+captcha_22.png	ELNFA
+captcha_23.png	ZMBZZ
+captcha_24.png	RFACS

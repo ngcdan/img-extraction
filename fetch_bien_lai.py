@@ -233,15 +233,11 @@ def download_pdf(driver, link_element):
 
         # Mở tab mới với URL của biên lai
         driver.execute_script(f"window.open('{href}', '_blank');")
-        time.sleep(2)
-
         # Chuyển sang tab mới
         driver.switch_to.window(driver.window_handles[-1])
-
         # Đợi trang tải xong
-        wait = WebDriverWait(driver, 10)
+        wait = WebDriverWait(driver, 5)
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-        time.sleep(2)
 
         # Tạo thư mục để lưu PDF nếu chưa tồn tại
         if not os.path.exists("downloaded_pdfs"):

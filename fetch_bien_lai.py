@@ -4,6 +4,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import subprocess
 import time
 import requests
@@ -12,10 +13,7 @@ import base64
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 import platform
-
-# Thông tin đăng nhập
-USERNAME = "0104232742"
-PASSWORD = "0104232742"
+from datetime import datetime
 
 def is_chrome_running_with_debug():
     """Kiểm tra xem Chrome có đang chạy với debug port không"""
@@ -92,6 +90,35 @@ def get_chrome_driver():
         print(f"Lỗi khi khởi động và kết nối Chrome: {e}")
         return None
 
+
+# Cập nhật phần mở trang đăng nhập
+def navigate_to_login(driver):
+    """Mở trang đăng nhập với xử lý lỗi"""
+    try:
+        # Đóng các tab cũ nếu có
+        if len(driver.window_handles) > 1:
+            for handle in driver.window_handles[1:]:
+                driver.switch_to.window(handle)
+                driver.close()
+            driver.switch_to.window(driver.window_handles[0])
+
+        # Mở trang đăng nhập trong tab mới
+        driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
+        time.sleep(1)
+
+        # Chuyển đến tab mới
+        driver.switch_to.window(driver.window_handles[-1])
+
+        # Đợi cho trang load xong
+        wait = WebDriverWait(driver, 10)
+        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+
+        return True
+
+    except Exception as e:
+        print(f"Lỗi khi mở trang đăng nhập: {str(e)}")
+        raise
+
 def get_login_credentials():
     root = tk.Tk()
     root.withdraw()  # Ẩn cửa sổ chính của Tkinter
@@ -150,14 +177,43 @@ def start_chrome_with_debug():
         print(f"Lỗi khi khởi động Chrome: {e}")
         return False
 
-def fill_login_info(driver, username, password):
-    username_input = driver.find_element(By.ID, "form-username")
-    username_input.clear()
-    username_input.send_keys(username)
-    password_input = driver.find_element(By.ID, "form-password")
-    password_input.clear()
-    password_input.send_keys(password)
-    print("Đã điền username và password")
+def fill_login_info(driver, username, password, max_retries=3):
+    """Điền thông tin đăng nhập với retry và explicit wait"""
+    wait = WebDriverWait(driver, 10)  # Đợi tối đa 10 giây
+    retry_count = 0
+
+    while retry_count < max_retries:
+        try:
+            # Đợi cho đến khi form login xuất hiện
+            wait.until(EC.presence_of_element_located((By.ID, "form-username")))
+            wait.until(EC.element_to_be_clickable((By.ID, "form-username")))
+
+            # Tìm và điền username
+            username_input = driver.find_element(By.ID, "form-username")
+            username_input.clear()
+            username_input.send_keys(username)
+            print("Đã điền username")
+
+            # Đợi và điền password
+            wait.until(EC.presence_of_element_located((By.ID, "form-password")))
+            password_input = driver.find_element(By.ID, "form-password")
+            password_input.clear()
+            password_input.send_keys(password)
+            print("Đã điền password")
+
+            return True
+
+        except (TimeoutException, NoSuchElementException) as e:
+            retry_count += 1
+            print(f"Lần thử {retry_count}: Không tìm thấy form đăng nhập. Đang thử lại...")
+
+            if retry_count < max_retries:
+                # Refresh trang và đợi 2 giây trước khi thử lại
+                driver.refresh()
+                time.sleep(2)
+            else:
+                print(f"Lỗi sau {max_retries} lần thử: {str(e)}")
+                raise Exception(f"Không thể điền thông tin đăng nhập sau {max_retries} lần thử")
 
 def navigate_to_bien_lai_list(driver, so_tk=None):
     try:
@@ -171,6 +227,8 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         driver.execute_script("document.querySelector('ul.nav-treeview').style.display = 'block';")
         print("Đã hiển thị menu con (display: block)")
 
+        time.sleep(2)
+
         bien_lai_link = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href='/danh-sach-tra-cuu-bien-lai-dien-tu']")))
         print("Đã tìm thấy '2. Danh sách biên lai điện tử', chuẩn bị nhấp...")
         actions.move_to_element(bien_lai_link).click().perform()
@@ -179,7 +237,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         # Nếu có số tờ khai, thực hiện tìm kiếm
         if so_tk:
             try:
-                time.sleep(2)  # Đợi trang load xong
+                time.sleep(3)  # Đợi trang load xong
                 so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
                 so_tk_input.clear()
                 so_tk_input.send_keys(so_tk)
@@ -234,10 +292,10 @@ def get_file_info(driver, link_element):
     try:
         row = link_element.find_element(By.XPATH, "./ancestor::tr")
         columns = row.find_elements(By.TAG_NAME, "td")
-        so_tien = columns[4].text.strip()
+        so_tk = columns[4].text.strip()
         ngay = columns[5].text.strip()
         ngay_formatted = ngay.replace('/', '')
-        filename = f"{ngay_formatted}_{so_tien}.pdf"
+        filename = f"{so_tk}.pdf"
         filename = "".join(c for c in filename if c.isalnum() or c in ['_', '-', '.'])
         return filename
     except Exception as e:
@@ -247,24 +305,53 @@ def get_file_info(driver, link_element):
 def download_pdf(driver, link_element):
     try:
         href = link_element.get_attribute('href')
-        print(f"Link gốc: {href}")
+        # Tìm row chứa link (đi ngược lên từ thẻ a đến tr)
+        row = link_element.find_element(By.XPATH, "./ancestor::tr")
 
+        # Lấy tất cả các cột trong row
+        columns = row.find_elements(By.TAG_NAME, "td")
+
+        # Lấy giá trị từ cột thứ 5 và 6 (index 4 và 5)
+        so_tk = columns[4].text.strip()
+        ngay = columns[5].text.strip()
+
+        # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
+        ngay_formatted = ngay.replace('/', '')
+
+        # Tạo tên file
         filename = get_file_info(driver, link_element)
-        if not filename:
-            mhd = href.split('mhd=')[1].split('&')[0]
-            filename = f"hoa_don_{mhd}.pdf"
 
-        print(f"Tên file: {filename}")
+        # Tạo cấu trúc thư mục
+        base_dir = "downloaded_pdfs"
+        date_dir = os.path.join(base_dir, ngay_formatted)
+        so_tk_dir = os.path.join(date_dir, so_tk)
 
+        # Tạo các thư mục nếu chưa tồn tại
+        for directory in [base_dir, date_dir, so_tk_dir]:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+                print(f"Đã tạo thư mục: {directory}")
+
+        # Đường dẫn đầy đủ của file (trong thư mục số tờ khai)
+        full_path = os.path.join(so_tk_dir, filename)
+
+        # Kiểm tra nếu file đã tồn tại
+        if os.path.exists(full_path):
+            base_name = os.path.splitext(filename)[0]
+            counter = 1
+            while os.path.exists(full_path):
+                new_filename = f"{base_name}_{counter}.pdf"
+                full_path = os.path.join(so_tk_dir, new_filename)
+                counter += 1
+
+        print(f"Tên file: {os.path.basename(full_path)}")
+        print(f"Đường dẫn: {full_path}")
+
+        # Mở và tải PDF
         driver.execute_script(f"window.open('{href}', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
         wait = WebDriverWait(driver, 5)
         wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-
-        if not os.path.exists("downloaded_pdfs"):
-            os.makedirs("downloaded_pdfs")
-
-        full_path = os.path.join("downloaded_pdfs", filename)
 
         print_options = {
             'landscape': False,
@@ -276,6 +363,7 @@ def download_pdf(driver, link_element):
         pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
         pdf_data = base64.b64decode(pdf['data'])
 
+        # Lưu file
         with open(full_path, 'wb') as f:
             f.write(pdf_data)
 

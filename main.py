@@ -29,7 +29,7 @@ def preprocess_image(image):
     return sharpened
 
 # Đường dẫn file PDF trong thư mục 'data'
-pdf_path = Path("data/3.pdf")
+pdf_path = Path("data/2.pdf")
 
 # Tạo thư mục 'data/img' nếu chưa tồn tại
 img_dir = Path("data/img")

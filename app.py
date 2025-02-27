@@ -12,8 +12,12 @@ import platform
 import subprocess
 import threading
 from selenium.webdriver.chrome.options import Options
-
-from fetch_bien_lai import get_chrome_driver, fill_login_info, navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
+import PyPDF2
+import io
+from extract_info import process_file_content
+from pdfminer.high_level import extract_text
+from datetime import datetime
+from fetch_bien_lai import navigate_to_login, get_chrome_driver, fill_login_info, navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
 
 app = Flask(__name__)
 
@@ -95,13 +99,19 @@ def initialize_chrome():
 def process_download(username, so_tk=None):
     global driver, download_status
     try:
-        # Mở trang đăng nhập
-        driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
-        time.sleep(1)
-        driver.switch_to.window(driver.window_handles[-1])
+        try:
+            # Mở trang đăng nhập
+            navigate_to_login(driver)
 
-        # Đăng nhập
-        fill_login_info(driver, username, username)
+            # Đăng nhập
+            if fill_login_info(driver, username, username):
+                print("Đăng nhập thành công")
+            else:
+                raise Exception("Không thể đăng nhập")
+
+        except Exception as e:
+            print(f"Lỗi trong quá trình đăng nhập: {str(e)}")
+            # Xử lý lỗi phù hợp
 
         # Thêm script theo dõi captcha
         js_script = """
@@ -219,6 +229,84 @@ def start_download():
 @app.route('/status')
 def get_status():
     return jsonify(download_status)
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    """Route xử lý upload file và trích xuất thông tin"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'Không tìm thấy file'})
+
+        file = request.files['file']
+        if not file or not file.filename:
+            return jsonify({'error': 'Không có file được chọn'})
+
+        print(f"Đã nhận file: {file.filename}")
+
+        try:
+            # Đọc và xử lý nội dung file
+            if file.filename.endswith('.pdf'):
+                file_bytes = io.BytesIO(file.read())
+                text = extract_text(file_bytes)
+                file_content = file_bytes.getvalue()  # Lưu nội dung PDF
+            else:
+                text = file.read().decode('utf-8')
+                file_content = file.read()  # Lưu nội dung file
+
+            # Trích xuất thông tin
+            extracted_info = process_file_content(text)
+
+            # Chuyển đổi ngày thành định dạng thư mục (dd-mm-yyyy)
+            date_str = extracted_info['date']
+            # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
+            ngay_formatted = date_str.replace('/', '')
+
+            # Tạo cấu trúc thư mục
+            base_dir = "downloaded_pdfs"
+            date_dir = os.path.join(base_dir, ngay_formatted)
+            so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
+
+            # Tạo các thư mục nếu chưa tồn tại
+            for directory in [base_dir, date_dir, so_tk_dir]:
+                if not os.path.exists(directory):
+                    os.makedirs(directory)
+                    print(f"Đã tạo thư mục: {directory}")
+
+            # Đường dẫn đầy đủ của file
+            full_path = os.path.join(so_tk_dir, file.filename)
+
+            # Kiểm tra nếu file đã tồn tại
+            if os.path.exists(full_path):
+                base_name, ext = os.path.splitext(file.filename)
+                counter = 1
+                while os.path.exists(full_path):
+                    new_filename = f"{base_name}_{counter}{ext}"
+                    full_path = os.path.join(so_tk_dir, new_filename)
+                    counter += 1
+
+            # Lưu file
+            with open(full_path, 'wb') as f:
+                if file.filename.endswith('.pdf'):
+                    f.write(file_content)
+                else:
+                    f.write(file_content.encode('utf-8'))
+
+            print(f"Đã lưu file: {full_path}")
+
+            return jsonify({
+                'success': True,
+                'message': 'Trích xuất và lưu file thành công',
+                'data': extracted_info,
+                'saved_path': full_path
+            })
+
+        except Exception as e:
+            print(f"Lỗi khi xử lý file: {e}")
+            return jsonify({'error': f'Lỗi khi xử lý file: {str(e)}'})
+
+    except Exception as e:
+        print(f"Lỗi server: {e}")
+        return jsonify({'error': f'Lỗi server: {str(e)}'})
 
 def close_specific_tabs(url_pattern):
     """Đóng các tab có địa chỉ chứa url_pattern"""

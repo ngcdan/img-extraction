@@ -8,19 +8,70 @@
     <div class="container">
       <h1>Tải Biên Lai Tự Động</h1>
 
-      <div class="form-container">
-        <div class="input-group">
-          <label for="username">Mã số thuế <span class="required">*</span></label>
-          <input type="text" id="username" placeholder="Nhập mã số thuế">
+      <div class="upload-section">
+        <h2>Trích xuất thông tin từ file</h2>
+
+        <div class="upload-form">
+          <div class="file-drop-zone" id="dropZone">
+            <input type="file" id="upload-file" accept=".txt,.pdf" style="display: none;">
+            <div class="drop-zone-content">
+              <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 24 24">
+                <path
+                  d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" />
+              </svg>
+              <div class="drop-text">
+                <span class="primary-text">Kéo thả file Thông báo nộp phí vào đây</span>
+                <span class="secondary-text">hoặc</span>
+                <button class="browse-btn" onclick="document.getElementById('upload-file').click()">Chọn file</button>
+              </div>
+              <div class="file-info" style="display: none;">
+                <span class="file-name"></span>
+                <button class="remove-file" onclick="removeFile()">×</button>
+              </div>
+            </div>
+          </div>
+          <small class="hint">Chỉ chấp nhận file .txt hoặc .pdf</small>
+          <button class="extract-btn" onclick="uploadFile()" disabled>Trích xuất thông tin</button>
+        </div>
+      </div>
+
+      <div class="form-container"
+        style="display: flex; flex-direction: column; align-items: center; max-width: 500px; margin: 0 auto;">
+        <div class="input-group" style="width: 100%;">
+          <label for="username">
+            Mã số thuế <span class="required">*</span>
+          </label>
+          <input
+            type="text"
+            id="username"
+            class="form-input"
+            placeholder="Nhập mã số thuế">
         </div>
 
-        <div class="input-group">
-          <label for="so_tk">Số tờ khai (không bắt buộc)</label>
-          <input type="text" id="so_tk" placeholder="Nhập số tờ khai nếu cần">
+        <div class="input-group" style="width: 100%;">
+          <label for="so_tk">
+            Số tờ khai
+            <span class="optional">(không bắt buộc)</span>
+          </label>
+          <input
+            type="text"
+            id="so_tk"
+            class="form-input"
+            placeholder="Nhập số tờ khai nếu cần">
           <small class="hint">Để trống nếu muốn tải tất cả biên lai</small>
         </div>
 
-        <button onclick="startDownload()">Bắt đầu tải</button>
+        <button
+          class="download-btn"
+          onclick="startDownload()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Bắt đầu tải
+        </button>
       </div>
 
       <div id="status" class="status-container" style="display: none;">
@@ -37,20 +88,155 @@
     </div>
 
     <script>
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('upload-file');
+const fileInfo = document.querySelector('.file-info');
+const fileName = document.querySelector('.file-name');
+const extractBtn = document.querySelector('.extract-btn');
+const dropZoneContent = document.querySelector('.drop-zone-content');
+
+// Prevent default drag behaviors
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+  dropZone.addEventListener(eventName, preventDefaults, false);
+  document.body.addEventListener(eventName, preventDefaults, false);
+});
+
+function preventDefaults (e) {
+  e.preventDefault();
+  e.stopPropagation();
+}
+
+// Highlight drop zone when item is dragged over it
+['dragenter', 'dragover'].forEach(eventName => {
+  dropZone.addEventListener(eventName, highlight, false);
+});
+
+['dragleave', 'drop'].forEach(eventName => {
+  dropZone.addEventListener(eventName, unhighlight, false);
+});
+
+function highlight(e) {
+  dropZone.classList.add('drag-over');
+}
+
+function unhighlight(e) {
+  dropZone.classList.remove('drag-over');
+}
+
+// Handle dropped files
+dropZone.addEventListener('drop', handleDrop, false);
+
+function handleDrop(e) {
+  const dt = e.dataTransfer;
+  const files = dt.files;
+
+  if (files.length > 0) {
+    handleFiles(files);
+  }
+}
+
+// Handle file selection
+fileInput.addEventListener('change', function() {
+  handleFiles(this.files);
+});
+
+function handleFiles(files) {
+  if (files.length > 0) {
+    const file = files[0];
+    if (file.type === 'text/plain' || file.type === 'application/pdf') {
+      showFileInfo(file);
+      fileInput.files = files; // Update file input
+      extractBtn.disabled = false;
+    } else {
+      showMessage('Chỉ chấp nhận file .txt hoặc .pdf', 'error');
+      removeFile();
+    }
+  }
+}
+
+function showFileInfo(file) {
+  fileName.textContent = file.name;
+  fileInfo.style.display = 'flex';
+  dropZoneContent.querySelector('.drop-text').style.display = 'none';
+  dropZoneContent.querySelector('.upload-icon').style.display = 'none';
+}
+
+function removeFile() {
+  fileInput.value = '';
+  fileInfo.style.display = 'none';
+  dropZoneContent.querySelector('.drop-text').style.display = 'flex';
+  dropZoneContent.querySelector('.upload-icon').style.display = 'block';
+  extractBtn.disabled = true;
+}
+
+function uploadFile() {
+  const file = fileInput.files[0];
+  if (!file) {
+    showMessage('Vui lòng chọn file', 'error');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  extractBtn.disabled = true;
+  extractBtn.textContent = 'Đang xử lý...';
+
+  fetch('/upload', {
+    method: 'POST',
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (data.error) {
+      showMessage(data.error, 'error');
+    } else {
+      // Tự động điền thông tin vào form
+      const usernameInput = document.getElementById('username');
+      const soTkInput = document.getElementById('so_tk');
+
+      if (data.data.tax_number) {
+        usernameInput.value = data.data.tax_number;
+        usernameInput.classList.add('filled');
+        setTimeout(() => usernameInput.classList.remove('filled'), 2000);
+      }
+
+      if (data.data.customs_number) {
+        soTkInput.value = data.data.customs_number;
+        soTkInput.classList.add('filled');
+        setTimeout(() => soTkInput.classList.remove('filled'), 2000);
+      }
+
+      showMessage('Đã điền thông tin từ file', 'success');
+    }
+  })
+  .catch(error => {
+    showMessage('Lỗi khi upload: ' + error.message, 'error');
+  })
+  .finally(() => {
+    extractBtn.disabled = false;
+    extractBtn.textContent = 'Trích xuất thông tin';
+  });
+}
+
+function useExtractedInfo() {
+    const taxNumber = document.getElementById('extracted-tax').textContent;
+    const customsNumber = document.getElementById('extracted-customs').textContent;
+
+    if (taxNumber !== 'Không tìm thấy') {
+        document.getElementById('username').value = taxNumber;
+    }
+    if (customsNumber !== 'Không tìm thấy') {
+        document.getElementById('so_tk').value = customsNumber;
+    }
+
+    showMessage('Đã điền thông tin', 'success');
+}
+
     function startDownload() {
         const username = document.getElementById('username').value;
         const soTk = document.getElementById('so_tk').value;
-
-        if (!username || !/^\d+$/.test(username)) {
-            showMessage('Mã số thuế không hợp lệ', 'error');
-            return;
-        }
-
-        if (soTk && !/^\d+$/.test(soTk)) {
-            showMessage('Số tờ khai không hợp lệ', 'error');
-            return;
-        }
-
         const formData = new FormData();
         formData.append('username', username);
         if (soTk) {

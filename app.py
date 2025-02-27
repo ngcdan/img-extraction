@@ -14,7 +14,7 @@ import threading
 from selenium.webdriver.chrome.options import Options
 import PyPDF2
 import io
-from extract_info import process_file_content
+from extract_info import process_file_content, query_customs_info
 from pdfminer.high_level import extract_text
 from datetime import datetime
 from fetch_bien_lai import navigate_to_login, get_chrome_driver, fill_login_info, navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
@@ -256,7 +256,6 @@ def upload_file():
             # Trích xuất thông tin
             extracted_info = process_file_content(text)
 
-            # Chuyển đổi ngày thành định dạng thư mục (dd-mm-yyyy)
             date_str = extracted_info['date']
             # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
             ngay_formatted = date_str.replace('/', '')
@@ -265,6 +264,14 @@ def upload_file():
             base_dir = "downloaded_pdfs"
             date_dir = os.path.join(base_dir, ngay_formatted)
             so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
+            results = query_customs_info(extracted_info['customs_number'])
+
+            # Kiểm tra kết quả và lấy HWBNO
+            if results and len(results) > 0:
+                extracted_info['hawb'] = results[0].HWBNO
+            else:
+                extracted_info['hawb'] = None
+
 
             # Tạo các thư mục nếu chưa tồn tại
             for directory in [base_dir, date_dir, so_tk_dir]:

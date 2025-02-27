@@ -10,3 +10,5 @@ deathbycaptcha #pip install git+https://github.com/codevance/python-deathbycaptc
 paddlepaddle
 paddleocr
 sklearn
+
+pyodbc

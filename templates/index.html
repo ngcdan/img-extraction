@@ -37,6 +37,11 @@
 
       <div class="form-container"
         style="display: flex; flex-direction: column; align-items: center; max-width: 500px; margin: 0 auto;">
+
+        <div class="form-group">
+          <label>Hawb No: <span id="hawb_display" class="hawb-value">...</span></label>
+        </div>
+
         <div class="input-group" style="width: 100%;">
           <label for="username">
             Mã số thuế <span class="required">*</span>
@@ -195,6 +200,7 @@ function uploadFile() {
       // Tự động điền thông tin vào form
       const usernameInput = document.getElementById('username');
       const soTkInput = document.getElementById('so_tk');
+      const hawb = document.getElementById('hawb');
 
       if (data.data.tax_number) {
         usernameInput.value = data.data.tax_number;
@@ -206,6 +212,15 @@ function uploadFile() {
         soTkInput.value = data.data.customs_number;
         soTkInput.classList.add('filled');
         setTimeout(() => soTkInput.classList.remove('filled'), 2000);
+      }
+
+      // Hiển thị HAWB nếu có
+      if (data.data.hawb) {
+        hawbDisplay.textContent = data.data.hawb;
+        hawbDisplay.classList.add('filled');
+        setTimeout(() => hawbDisplay.classList.remove('filled'), 2000);
+      } else {
+        hawbDisplay.textContent = '[]';
       }
 
       showMessage('Đã điền thông tin từ file', 'success');

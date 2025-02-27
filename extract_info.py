@@ -1,6 +1,7 @@
 from pdfminer.high_level import extract_text
 import re
 import os
+import pyodbc
 
 def extract_text_from_pdf(pdf_path):
     """Trích xuất văn bản từ file PDF."""
@@ -168,6 +169,55 @@ def process_file_content(text):
         'date': date
     }
 
+# Hàm tạo kết nối SQL Server và thực hiện truy vấn
+def query_customs_info(customs_number):
+    """Tạo kết nối SQL Server và truy vấn thông tin dựa trên số tờ khai"""
+    try:
+        # Chuỗi kết nối SQL Server
+        conn_str = (
+            "DRIVER={ODBC Driver 17 for SQL Server};"
+            "SERVER=of1.beelogistics.com,34541;"
+            "DATABASE=BEE_DB;"
+            "UID=devhph;"
+            "PWD=Hph@dev!@#123;"
+            "Encrypt=yes;"
+            "TrustServerCertificate=yes;"
+        )
+
+        # Tạo kết nối
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+
+        # Truy vấn SQL với số tờ khai
+        query = """
+        SELECT td.TransID, td.HWBNO, cs.TKSo, ui.FullName as nguoi_khai
+        FROM TransactionDetails td
+        JOIN CustomsDeclaration cs ON cs.MasoTK = td.CustomsID
+        JOIN UserInfos ui ON ui.Username = cs.NguoiKhai
+        WHERE cs.TKSo = ?
+        """
+
+        # Thực hiện truy vấn với tham số
+        cursor.execute(query, customs_number)
+        result = cursor.fetchall()
+
+        # Đóng kết nối
+        cursor.close()
+        conn.close()
+
+        if result:
+            print("\nKết quả truy vấn từ cơ sở dữ liệu:")
+            for row in result:
+                print(f"TransID: {row.TransID}, HWBNO: {row.HWBNO}, TKSo: {row.TKSo}, Người khai: {row.nguoi_khai}")
+            return result
+        else:
+            print("Không tìm thấy dữ liệu phù hợp trong cơ sở dữ liệu.")
+            return None
+
+    except pyodbc.Error as e:
+        print(f"Lỗi khi kết nối hoặc truy vấn cơ sở dữ liệu: {e}")
+        return None
+
 def main():
 
     # Giả lập việc trích xuất từ PDF
@@ -185,7 +235,10 @@ def main():
         customs_number = extract_customs_declaration(text)
         if customs_number:
             print("Số tờ khai hải quan:", customs_number)
+            # Thực hiện truy vấn SQL với số tờ khai
+            query_customs_info(customs_number)
             print("Định dạng hợp lệ:", validate_customs_number(customs_number))
+
 
     else:
         print("Không thể trích xuất văn bản từ file.")

@@ -23,3 +23,4 @@ captcha_21.png	VKMGU
 captcha_22.png	ELNFA
 captcha_23.png	ZMBZZ
 captcha_24.png	RFACS
+captcha_25.png	BUNMT

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Tải Biên Lai</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  </head>
+  <body>
+    <div class="container">
+      <h1>Tải Biên Lai Tự Động</h1>
+
+      <div class="form-container">
+        <div class="input-group">
+          <label for="username">Mã số thuế <span class="required">*</span></label>
+          <input type="text" id="username" placeholder="Nhập mã số thuế">
+        </div>
+
+        <div class="input-group">
+          <label for="so_tk">Số tờ khai (không bắt buộc)</label>
+          <input type="text" id="so_tk" placeholder="Nhập số tờ khai nếu cần">
+          <small class="hint">Để trống nếu muốn tải tất cả biên lai</small>
+        </div>
+
+        <button onclick="startDownload()">Bắt đầu tải</button>
+      </div>
+
+      <div id="status" class="status-container" style="display: none;">
+        <h2>Trạng thái tải</h2>
+        <div class="progress-bar">
+          <div id="progress" class="progress"></div>
+        </div>
+        <p>Đã tải: <span id="current">0</span>/<span id="total">0</span></p>
+        <p>Thành công: <span id="success">0</span></p>
+        <p>Thất bại: <span id="failed">0</span></p>
+      </div>
+
+      <div id="message" class="message"></div>
+    </div>
+
+    <script>
+    function startDownload() {
+        const username = document.getElementById('username').value;
+        const soTk = document.getElementById('so_tk').value;
+
+        if (!username || !/^\d+$/.test(username)) {
+            showMessage('Mã số thuế không hợp lệ', 'error');
+            return;
+        }
+
+        if (soTk && !/^\d+$/.test(soTk)) {
+            showMessage('Số tờ khai không hợp lệ', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('username', username);
+        if (soTk) {
+            formData.append('so_tk', soTk);
+        }
+
+        fetch('/start', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.error) {
+                showMessage(data.error, 'error');
+            } else {
+                document.getElementById('status').style.display = 'block';
+                startStatusCheck();
+            }
+        })
+        .catch(error => {
+            showMessage('Lỗi kết nối đến server: ' + error.message, 'error');
+        });
+    }
+
+    function startStatusCheck() {
+        const statusCheck = setInterval(() => {
+            fetch('/status')
+            .then(response => response.json())
+            .then(data => {
+                updateStatus(data);
+                if (data.status === 'completed' || data.status === 'error') {
+                    clearInterval(statusCheck);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching status:', error);
+                clearInterval(statusCheck);
+            });
+        }, 1000);
+    }
+
+        function updateStatus(data) {
+            document.getElementById('current').textContent = data.current;
+            document.getElementById('total').textContent = data.total;
+            document.getElementById('success').textContent = data.success;
+            document.getElementById('failed').textContent = data.failed;
+
+            if (data.total > 0) {
+                const progress = (data.current / data.total) * 100;
+                document.getElementById('progress').style.width = `${progress}%`;
+            }
+
+            if (data.status === 'completed') {
+                showMessage('Tải xuống hoàn tất!', 'success');
+            } else if (data.status === 'error') {
+                showMessage('Đã xảy ra lỗi!', 'error');
+            }
+        }
+
+        function showMessage(message, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = message;
+            messageDiv.className = `message ${type}`;
+        }
+    </script>
+  </body>
+</html>

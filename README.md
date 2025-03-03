@@ -7,7 +7,7 @@
 ### Windows
 
 1. Cài đặt Python:
-   - Tải Python 3.8+ từ [python.org](https://www.python.org/downloads/)
+   - Tải Python 3.10.10 từ [python.org](https://www.python.org/ftp/python/3.10.10/python-3.10.10-amd64.exe)
    - ⚠️ Khi cài đặt, PHẢI chọn "Add Python to PATH"
    - Kiểm tra cài đặt:
    ```bash

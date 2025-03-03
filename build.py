@@ -4,6 +4,13 @@ import os
 import shutil
 import platform
 
+def get_odbc_driver_path():
+    """Lấy đường dẫn tới ODBC driver trong virtual environment"""
+    if platform.system() == 'Windows':
+        return os.path.join(os.environ['VIRTUAL_ENV'], 'Lib', 'site-packages', 'pyodbc', 'drivers')
+    else:
+        return os.path.join(os.environ['VIRTUAL_ENV'], 'lib', 'python3.8', 'site-packages', 'pyodbc', 'drivers')
+
 def clean_build():
     """Dọn dẹp các thư mục build cũ"""
     dirs_to_clean = ['build', 'dist']
@@ -28,37 +35,22 @@ def build_app():
         ('templates', 'templates'),
         ('static', 'static'),
         ('.env', '.'),
-        ('service-account-key.json', '.'),
+        ('drivers', 'drivers'),  # Thêm thư mục drivers
     ]
 
-    # Tạo danh sách các tham số cho PyInstaller
+    # Thêm ODBC driver vào bundle
+    odbc_path = get_odbc_driver_path()
+    if os.path.exists(odbc_path):
+        additional_files.append((odbc_path, 'drivers'))
+
+    # Các tham số PyInstaller
     params = [
-        'app.py',                    # Main script
-        '--name=ImgExtraction',      # Tên file exe/binary
-        '--clean',                   # Xóa cache trước khi build
-        '--noconfirm',               # Không hỏi xác nhận khi xóa
+        'app.py',
+        '--name=ImgExtraction',
+        '--onefile',
+        '--clean',
+        '--noconfirm',
     ]
-
-    # Cấu hình theo hệ điều hành
-    if platform.system() == 'Windows':
-        params.extend([
-            '--onefile',             # Đóng gói thành một file duy nhất cho Windows
-            '--noconsole',           # Ẩn console trên Windows
-            '--win-private-assemblies',
-        ])
-        # Thêm icon cho Windows
-        icon_path = os.path.join(current_dir, 'static', 'favicon.ico')
-        if os.path.exists(icon_path):
-            params.append(f'--icon={icon_path}')
-    else:  # macOS
-        params.extend([
-            '--onefile',             # Đóng gói thành một file duy nhất cho macOS
-            '--windowed',            # Tạo app bundle cho macOS
-        ])
-        # Thêm icon cho macOS
-        icon_path = os.path.join(current_dir, 'static', 'favicon.icns')
-        if os.path.exists(icon_path):
-            params.append(f'--icon={icon_path}')
 
     # Thêm data files
     for src, dst in additional_files:
@@ -66,35 +58,14 @@ def build_app():
         if os.path.exists(src_path):
             params.append(f'--add-data={src}{separator}{dst}')
 
-    # Thêm các hidden imports cho Flask và dependencies
+    # Thêm các hidden imports
     hidden_imports = [
-        'engineio.async_drivers.threading',
-        'flask_socketio',
-        'eventlet.hubs.epolls',
-        'eventlet.hubs.kqueue',
-        'eventlet.hubs.selects',
-        'dns.dnssec',
-        'dns.e164',
-        'dns.hash',
-        'dns.namedict',
-        'dns.tsigkeyring',
-        'dns.update',
-        'dns.version',
-        'dns.zone',
-        'rapidfuzz',
-        'rapidfuzz.fuzz',
-        'rapidfuzz.string_metric',
-        'rapidfuzz.process',
+        'pyodbc',
+        'unixodbc',  # Cho macOS/Linux
     ]
 
     for imp in hidden_imports:
         params.append(f'--hidden-import={imp}')
-
-    # Thêm các collect submodules
-    params.extend([
-        '--collect-submodules=rapidfuzz',
-        '--exclude-module=rapidfuzz.__pyinstaller',
-    ])
 
     # Chạy PyInstaller
     PyInstaller.__main__.run(params)

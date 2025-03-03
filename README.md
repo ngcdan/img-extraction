@@ -157,16 +157,13 @@ Lưu ý: File `.env` chứa thông tin nhạy cảm và đã được thêm vào
 
 ### Chuẩn bị môi trường
 
-1. Tạo và kích hoạt môi trường ảo:
-
-Windows:
+1. Tạo và kích hoạt virtual environment:
 ```bash
+# Windows
 python -m venv env
 .\env\Scripts\activate
-```
 
-macOS:
-```bash
+# macOS/Linux
 python3 -m venv env
 source env/bin/activate
 ```
@@ -176,16 +173,12 @@ source env/bin/activate
 pip install -r requirements.txt
 ```
 
-### Build ứng dụng
-
-1. Chạy script build:
+3. Build ứng dụng:
 ```bash
 python build.py
 ```
 
-2. File thực thi sẽ được tạo trong thư mục `dist`:
-- Windows: `dist/ImgExtraction.exe`
-- macOS: `dist/ImgExtraction`
+Lưu ý: Khi build, script sẽ tự động bundle ODBC driver vào ứng dụng.
 
 ### Chạy ứng dụng đã build
 

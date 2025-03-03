@@ -1,4 +1,6 @@
 import os
+import sys
+import platform
 import json
 import re
 import pyodbc
@@ -12,6 +14,36 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from time import sleep
 from tenacity import retry, stop_after_attempt, wait_exponential
+
+def get_bundle_dir():
+    """Lấy đường dẫn thư mục bundle"""
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+def get_odbc_driver():
+    """Lấy driver ODBC từ bundle hoặc hệ thống"""
+    try:
+        # Thử tìm driver trong bundle
+        bundle_driver_path = os.path.join(get_bundle_dir(), 'drivers')
+        if os.path.exists(bundle_driver_path):
+            if platform.system() == 'Windows':
+                return os.path.join(bundle_driver_path, 'msodbcsql17.dll')
+            else:
+                return os.path.join(bundle_driver_path, 'libmsodbcsql.17.dylib')
+
+        # Fallback to system drivers
+        drivers = pyodbc.drivers()
+        if drivers:
+            for driver in ['ODBC Driver 17 for SQL Server', 'ODBC Driver 18 for SQL Server']:
+                if driver in drivers:
+                    return driver
+
+        raise Exception("Không tìm thấy ODBC driver phù hợp")
+
+    except Exception as e:
+        print(f"Lỗi khi tìm ODBC driver: {str(e)}")
+        return None
 
 def append_to_google_sheet(extracted_info):
     """Thêm thông tin vào Google Sheet với retry logic"""
@@ -278,26 +310,26 @@ def process_file_content(file):
             'error': f'Lỗi khi xử lý file: {str(e)}'
         }
 
-# Hàm tạo kết nối SQL Server và thực hiện truy vấn
 def query_customs_info(customs_number):
-    """Tạo kết nối SQL Server và truy vấn thông tin dựa trên số tờ khai"""
+    """Tạo kết nối SQL Server và truy vấn thông tin"""
     try:
-        # Chuỗi kết nối SQL Server từ biến môi trường
+        driver = get_odbc_driver()
+        if not driver:
+            raise Exception("Không thể tìm thấy ODBC driver")
+
         conn_str = (
-            f"DRIVER={{{os.getenv('DB_DRIVER')}}};"
+            f"DRIVER={{{driver}}};"
             f"SERVER={os.getenv('DB_SERVER')};"
             f"DATABASE={os.getenv('DB_NAME')};"
             f"UID={os.getenv('DB_USER')};"
             f"PWD={os.getenv('DB_PASSWORD')};"
-            f"Encrypt={os.getenv('DB_ENCRYPT')};"
-            f"TrustServerCertificate={os.getenv('DB_TRUST_SERVER_CERTIFICATE')};"
+            f"Encrypt={os.getenv('DB_ENCRYPT', 'yes')};"
+            f"TrustServerCertificate={os.getenv('DB_TRUST_SERVER_CERTIFICATE', 'yes')};"
         )
 
-        # Tạo kết nối
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
 
-        # Truy vấn SQL với số tờ khai
         query = """
             SELECT
                 td.TransID, td.HWBNO, cs.TKSo, ui.FullName as nguoi_khai
@@ -307,25 +339,25 @@ def query_customs_info(customs_number):
             WHERE cs.TKSo = ?
         """
 
-        # Thực hiện truy vấn với tham số
         cursor.execute(query, customs_number)
         result = cursor.fetchall()
-
-        # Đóng kết nối
         cursor.close()
         conn.close()
 
         if result:
-            print("\nKết quả truy vấn từ cơ sở dữ liệu:")
+            print("\nKết quả truy vấn từ database:")
             for row in result:
-                print(f"TransID: {row.TransID}, HWBNO: {row.HWBNO}, TKSo: {row.TKSo}, Người khai: {row.nguoi_khai}")
+                print(f"TransID: {row.TransID}, HWBNO: {row.HWBNO}, "
+                      f"TKSo: {row.TKSo}, Người khai: {row.nguoi_khai}")
             return result
-        else:
-            print("Không tìm thấy dữ liệu phù hợp trong cơ sở dữ liệu.")
-            return None
 
-    except pyodbc.Error as e:
-        send_notification(f"Lỗi khi kết nối hoặc truy vấn cơ sở dữ liệu: {str(e)}", "error")
+        print("Không tìm thấy dữ liệu phù hợp.")
+        return None
+
+    except Exception as e:
+        error_msg = f"Lỗi database: {str(e)}"
+        print(error_msg)
+        send_notification(error_msg, "error")
         return None
 
 def extract_header_info(lines):

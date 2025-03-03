@@ -27,3 +27,7 @@ rapidfuzz>=2.0.0
 # Windows specific
 pywin32==305; sys_platform == 'win32'
 
+# Database
+pyodbc==4.0.39
+unixodbc-dev; platform_system != "Windows"  # Chỉ cài trên macOS/Linux
+

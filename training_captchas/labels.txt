@@ -77,3 +77,4 @@ captcha_72.png	GNVFS
 captcha_73.png	EDLRH
 captcha_74.png	YERES
 captcha_75.png	AQMVR
+captcha_76.png	QEYQY

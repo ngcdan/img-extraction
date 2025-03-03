@@ -8,65 +8,14 @@ import subprocess
 import requests
 import os
 import time
-
-def is_chrome_running_with_debug():
-    try:
-        response = requests.get('http://127.0.0.1:9222/json/version')
-        return response.status_code == 200
-    except:
-        return False
-
-def start_chrome_with_debug():
-    chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-    user_data_dir = os.path.expanduser('~/chrome-debug-profile')
-
-    if not os.path.exists(user_data_dir):
-        os.makedirs(user_data_dir)
-
-    try:
-        os.system("pkill -f 'Google Chrome'")
-        time.sleep(1)
-
-        subprocess.Popen([
-            chrome_path,
-            f'--user-data-dir={user_data_dir}',
-            '--remote-debugging-port=9222',
-            '--no-first-run',
-            '--no-default-browser-check',
-            'about:blank'
-        ])
-
-        time.sleep(3)
-        return True
-    except Exception as e:
-        print(f"Lỗi khi khởi động Chrome: {e}")
-        return False
-
-def get_chrome_driver():
-    if not is_chrome_running_with_debug():
-        print("Khởi động Chrome với debug mode...")
-        if not start_chrome_with_debug():
-            print("Không thể khởi động Chrome debug mode")
-            return None
-
-    print("Kết nối vào Chrome debug mode...")
-    chrome_options = Options()
-    chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-
-    try:
-        driver = webdriver.Chrome(options=chrome_options)
-        print("Đã kết nối thành công vào Chrome")
-        return driver
-    except Exception as e:
-        print(f"Lỗi khi kết nối Chrome: {e}")
-        return None
+from receipt_fetcher import initialize_chrome
 
 def collect_captcha_samples(num_samples=1000):
     SAVE_DIR = "training_captchas"
     if not os.path.exists(SAVE_DIR):
         os.makedirs(SAVE_DIR)
 
-    driver = get_chrome_driver()
+    driver = initialize_chrome()
     if driver is None:
         print("Không thể khởi tạo Chrome driver")
         return

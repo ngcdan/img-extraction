@@ -6,7 +6,7 @@ import io
 from datetime import datetime
 from openpyxl import load_workbook
 from pdfminer.high_level import extract_text
-from utils import send_notification
+from utils import send_notification, get_download_directory
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -234,7 +234,7 @@ def process_file_content(file):
                 ngay_formatted = extracted_info['date'].replace('/', '')
 
                 # Tạo cấu trúc thư mục
-                base_dir = "downloaded_pdfs"
+                base_dir = get_download_directory()
                 date_dir = os.path.join(base_dir, ngay_formatted)
                 so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
                 # Tạo các thư mục nếu chưa tồn tại

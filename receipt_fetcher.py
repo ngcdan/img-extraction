@@ -11,7 +11,7 @@ import subprocess
 import time
 import os
 import base64
-from utils import send_notification
+from utils import send_notification, get_download_directory
 from extract_info import update_last_row_sheet
 
 def initialize_chrome():
@@ -334,9 +334,8 @@ def get_file_info(driver, link_element):
         row = link_element.find_element(By.XPATH, "./ancestor::tr")
         columns = row.find_elements(By.TAG_NAME, "td")
         so_tk = columns[4].text.strip()
-        ngay = columns[5].text.strip()
-        ngay_formatted = ngay.replace('/', '')
-        filename = f"{so_tk}.pdf"
+        invoice_no = columns[8].text.strip()
+        filename = f"{so_tk}_{invoice_no}.pdf"
         filename = "".join(c for c in filename if c.isalnum() or c in ['_', '-', '.'])
         return filename
     except Exception as e:
@@ -358,7 +357,6 @@ def download_pdf(driver, link_element):
         custom_no = columns[4].text.strip()
         ngay = columns[5].text.strip()
         seriesNo = columns[7].text.strip()
-        print(f"SeriesNo: {seriesNo}")
         invoice_no = columns[8].text.strip()
 
         # Tạo dictionary chứa thông tin hóa đơn
@@ -379,7 +377,7 @@ def download_pdf(driver, link_element):
         filename = get_file_info(driver, link_element)
 
         # Tạo cấu trúc thư mục
-        base_dir = "downloaded_pdfs"
+        base_dir = get_download_directory()
         date_dir = os.path.join(base_dir, ngay_formatted)
         so_tk_dir = os.path.join(date_dir, custom_no)
 

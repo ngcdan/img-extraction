@@ -14,6 +14,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from time import sleep
 from tenacity import retry, stop_after_attempt, wait_exponential
+from threading import Thread
+from queue import Queue
 
 def append_to_google_sheet(extracted_info):
     """Thêm thông tin vào Google Sheet với retry logic"""
@@ -207,21 +209,62 @@ def process_file_content(file):
                 items = extract_items(sections['table'])
                 extracted_info['line_items'] = items
 
-                customs_number = extracted_info['customs_number'];
+                customs_number = extracted_info['customs_number']
                 if customs_number:
-                    query_result = query_customs_info(customs_number)
-                    if query_result and len(query_result) > 0:
-                        extracted_info.update({
-                            'jobId': query_result[0].TransID,
-                            'hawb': query_result[0].HWBNO,
-                            'nguoi_khai': query_result[0].nguoi_khai
-                        })
+                    # Tạo queue để nhận kết quả
+                    result_queue = Queue()
+
+                    # Khởi tạo và start thread
+                    query_thread = Thread(
+                        target=async_query_customs_info,
+                        args=(customs_number, result_queue)
+                    )
+                    query_thread.start()
+
+                    # Đợi kết quả tối đa 10 giây
+                    query_thread.join(timeout=10)
+
+                    if not result_queue.empty():
+                        result = result_queue.get()
+                        if result.get('success'):
+                            extracted_info.update({
+                                'jobId': result['jobId'],
+                                'hawb': result['hawb'],
+                                'nguoi_khai': result['nguoi_khai']
+                            })
+                            send_notification(
+                                f"Đã tìm thấy thông tin tờ khai: {customs_number}\n"
+                                f"Job ID: {result['jobId']}\n"
+                                f"HAWB: {result['hawb']}\n"
+                                f"Người khai: {result['nguoi_khai']}",
+                                "success"
+                            )
+                        else:
+                            extracted_info.update({
+                                'jobId': '',
+                                'hawb': '',
+                                'nguoi_khai': ''
+                            })
+                            if 'error' in result:
+                                send_notification(
+                                    f"Lỗi khi truy vấn thông tin tờ khai {customs_number}: {result['error']}",
+                                    "error"
+                                )
+                            else:
+                                send_notification(
+                                    f"Không tìm thấy thông tin tờ khai: {customs_number}",
+                                    "warning"
+                                )
                     else:
                         extracted_info.update({
                             'jobId': '',
                             'hawb': '',
                             'nguoi_khai': ''
                         })
+                        send_notification(
+                            f"Timeout khi truy vấn thông tin tờ khai: {customs_number}",
+                            "error"
+                        )
 
                 # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
                 ngay_formatted = extracted_info['date'].replace('/', '')
@@ -545,6 +588,31 @@ def update_last_row_sheet(invoice_info):
     except Exception as e:
         send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
         return False
+
+def async_query_customs_info(customs_number, result_queue):
+    """Hàm chạy trong thread riêng để query thông tin"""
+    try:
+        query_result = query_customs_info(customs_number)
+        if query_result and len(query_result) > 0:
+            result = {
+                'jobId': query_result[0].TransID,
+                'hawb': query_result[0].HWBNO,
+                'nguoi_khai': query_result[0].nguoi_khai,
+                'success': True
+            }
+        else:
+            result = {
+                'jobId': '',
+                'hawb': '',
+                'nguoi_khai': '',
+                'success': False
+            }
+        result_queue.put(result)
+    except Exception as e:
+        result_queue.put({
+            'error': str(e),
+            'success': False
+        })
 
 def main():
 

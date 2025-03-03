@@ -7,13 +7,14 @@ from selenium.webdriver.chrome.options import Options
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+
 import platform
 import requests
 import subprocess
 import time
 import os
 import base64
-from utils import send_notification, get_download_directory
+from utils import send_notification
 from extract_info import update_last_row_sheet
 
 def initialize_chrome():
@@ -63,33 +64,16 @@ def initialize_chrome():
         chrome_options = Options()
         chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
 
+        service = Service(ChromeDriverManager().install())
+
         try:
-            # Sử dụng webdriver_manager với cấu hình đơn giản hơn
-            service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
             send_notification("Đã kết nối với Chrome thành công", "success")
             return driver
         except Exception as e:
-            # Thử phương án dự phòng với ChromeDriver local
-            try:
-                if platform.system() == 'Windows':
-                    chromedriver_path = "./chromedriver.exe"
-                else:
-                    chromedriver_path = "./chromedriver"
-
-                if os.path.exists(chromedriver_path):
-                    service = Service(executable_path=chromedriver_path)
-                    driver = webdriver.Chrome(service=service, options=chrome_options)
-                    send_notification("Đã kết nối với Chrome thành công (sử dụng ChromeDriver local)", "success")
-                    return driver
-                else:
-                    error_message = f"Không tìm thấy ChromeDriver tại {chromedriver_path}"
-                    send_notification(error_message, "error")
-                    return None
-            except Exception as backup_e:
-                error_message = f"Lỗi khi kết nối với Chrome: {str(e)}\nLỗi phương án dự phòng: {str(backup_e)}"
-                send_notification(error_message, "error")
-                return None
+            error_message = f"Lỗi khi kết nối với Chrome: {str(e)}"
+            send_notification(error_message, "error")
+            return None
 
     except Exception as e:
         error_message = f"Lỗi khi khởi tạo Chrome: {str(e)}"
@@ -104,8 +88,6 @@ def process_download(driver, username, so_tk=None, download_status=None):
 
         # Mở trang đăng nhập trong tab mới
         driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
-        time.sleep(1)
-
         # Đăng nhập
         if fill_login_info(driver, username, username):
             print("Đăng nhập thành công")
@@ -153,7 +135,6 @@ def process_download(driver, username, so_tk=None, download_status=None):
                         print("Đăng nhập thành công")
                         login_success = True
                         break
-                time.sleep(1)
             except Exception as e:
                 print(f"Lỗi khi kiểm tra: {e}")
                 continue
@@ -170,23 +151,60 @@ def process_download(driver, username, so_tk=None, download_status=None):
             "a.color-blue.underline[href^='http://113.160.97.58:8224/Viewer/HoaDonViewer.aspx?mhd='][href$='iscd=1']"
         )))
 
+        if not links:
+            send_notification("Không tìm thấy biên lai nào", "warning")
+            return False
+
+        total_links = len(links)
+        send_notification(f"Tìm thấy {total_links} biên lai", "info")
+
         if download_status:
-            download_status['total'] = len(links)
+            download_status['total'] = total_links
 
         for i, link in enumerate(links, 1):
             if 'Xem' in link.text:
                 if download_status:
                     download_status['current'] = i
+                send_notification(f"Đang tải biên lai {i}/{total_links}", "info")
+
                 if download_pdf(driver, link):
                     if download_status:
                         download_status['success'] += 1
+                    send_notification(f"Tải thành công biên lai {i}/{total_links}", "success")
                 else:
                     if download_status:
                         download_status['failed'] += 1
+                    send_notification(f"Tải thất bại biên lai {i}/{total_links}", "error")
                 time.sleep(1)
 
         if download_status:
             download_status['status'] = 'completed'
+
+        success_rate = (download_status['success'] / total_links) * 100 if total_links > 0 else 0
+        send_notification(
+            f"Hoàn tất tải xuống: {download_status['success']}/{total_links} biên lai thành công ({success_rate:.1f}%)",
+            "success" if success_rate > 90 else "warning"
+        )
+
+        # Lưu handle của tất cả tabs
+        all_handles = driver.window_handles
+        localhost_handle = None
+
+        # Tìm và đóng tab biên lai, đồng thời tìm tab localhost
+        for handle in all_handles[:]:  # Dùng copy của list để tránh lỗi khi xóa phần tử
+            driver.switch_to.window(handle)
+            current_url = driver.current_url
+
+            if "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu" in current_url:
+                driver.close()
+            elif "http://localhost:8080" in current_url:
+                localhost_handle = handle
+
+        # Chuyển về tab localhost nếu tìm thấy
+        if localhost_handle and localhost_handle in driver.window_handles:
+            driver.switch_to.window(localhost_handle)
+            send_notification("Đã trở về trang chủ", "info")
+
         return True
 
     except Exception as e:
@@ -199,7 +217,7 @@ def process_download(driver, username, so_tk=None, download_status=None):
 
 def fill_login_info(driver, username, password, max_retries=3):
     """Điền thông tin đăng nhập với retry và explicit wait"""
-    wait = WebDriverWait(driver, 10)  # Đợi tối đa 10 giây
+    wait = WebDriverWait(driver, 20)  # Đợi tối đa 10 giây
     retry_count = 0
     login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
 
@@ -266,7 +284,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
 
         # Hover vào menu Tra cứu
         actions.move_to_element(tra_cuu_link).perform()
-        time.sleep(0.5)  # Đợi animation hover
+        time.sleep(1)  # Đợi animation hover
         send_notification("Đã hover vào 'Tra cứu'")
 
         # Click vào menu Tra cứu
@@ -277,7 +295,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         menu_treeview = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "ul.nav-treeview")))
         driver.execute_script("arguments[0].style.display = 'block'; arguments[0].classList.add('show');", menu_treeview)
         send_notification("Đã hiển thị menu con")
-        time.sleep(0.5)  # Đợi animation menu
+        time.sleep(1)  # Đợi animation menu
 
         # Tìm link biên lai
         bien_lai_link = wait.until(EC.element_to_be_clickable(
@@ -287,7 +305,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
 
         # Hover và click vào link biên lai
         actions.move_to_element(bien_lai_link).perform()
-        time.sleep(0.5)  # Đợi animation hover
+        time.sleep(1)  # Đợi animation hover
         send_notification("Đã hover vào link biên lai")
 
         actions.click().perform()
@@ -296,7 +314,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         # Nếu có số tờ khai, thực hiện tìm kiếm
         if so_tk:
             try:
-                time.sleep(2)  # Đợi trang load xong
+                time.sleep(3)  # Đợi trang load xong
                 so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
                 so_tk_input.clear()
                 so_tk_input.send_keys(so_tk)
@@ -309,7 +327,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
                 actions.click().perform()
                 send_notification("Đã nhấp nút tìm kiếm")
 
-                time.sleep(2)  # Đợi kết quả tìm kiếm
+                time.sleep(3)  # Đợi kết quả tìm kiếm
             except Exception as e:
                 send_notification(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}", "error")
                 raise
@@ -355,8 +373,9 @@ def get_file_info(driver, link_element):
         row = link_element.find_element(By.XPATH, "./ancestor::tr")
         columns = row.find_elements(By.TAG_NAME, "td")
         so_tk = columns[4].text.strip()
-        invoice_no = columns[8].text.strip()
-        filename = f"{so_tk}_{invoice_no}.pdf"
+        ngay = columns[5].text.strip()
+        ngay_formatted = ngay.replace('/', '')
+        filename = f"{so_tk}.pdf"
         filename = "".join(c for c in filename if c.isalnum() or c in ['_', '-', '.'])
         return filename
     except Exception as e:
@@ -378,6 +397,7 @@ def download_pdf(driver, link_element):
         custom_no = columns[4].text.strip()
         ngay = columns[5].text.strip()
         seriesNo = columns[7].text.strip()
+        print(f"SeriesNo: {seriesNo}")
         invoice_no = columns[8].text.strip()
 
         # Tạo dictionary chứa thông tin hóa đơn
@@ -398,7 +418,7 @@ def download_pdf(driver, link_element):
         filename = get_file_info(driver, link_element)
 
         # Tạo cấu trúc thư mục
-        base_dir = get_download_directory()
+        base_dir = "downloaded_pdfs"
         date_dir = os.path.join(base_dir, ngay_formatted)
         so_tk_dir = os.path.join(date_dir, custom_no)
 

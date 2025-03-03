@@ -85,3 +85,10 @@ captcha_80.png	VRJIF
 captcha_81.png	ZDRZF
 captcha_82.png	BTEEG
 captcha_83.png	FACHJ
+captcha_84.png	VDDBE
+captcha_85.png	CMDML
+captcha_86.png	CNEMZ
+captcha_87.png	ZWRDQ
+captcha_88.png	CZLNS
+captcha_89.png	PMCQK
+captcha_90.png	PDZY 

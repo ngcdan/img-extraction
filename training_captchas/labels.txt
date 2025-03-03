@@ -82,3 +82,6 @@ captcha_77.png	KDYSF
 captcha_78.png	HMADTY
 captcha_79.png	WQGQK
 captcha_80.png	VRJIF
+captcha_81.png	ZDRZF
+captcha_82.png	BTEEG
+captcha_83.png	FACHJ

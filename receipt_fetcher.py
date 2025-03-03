@@ -266,7 +266,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
 
         # Hover vào menu Tra cứu
         actions.move_to_element(tra_cuu_link).perform()
-        time.sleep(1)  # Đợi animation hover
+        time.sleep(0.5)  # Đợi animation hover
         send_notification("Đã hover vào 'Tra cứu'")
 
         # Click vào menu Tra cứu
@@ -277,7 +277,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         menu_treeview = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "ul.nav-treeview")))
         driver.execute_script("arguments[0].style.display = 'block'; arguments[0].classList.add('show');", menu_treeview)
         send_notification("Đã hiển thị menu con")
-        time.sleep(1)  # Đợi animation menu
+        time.sleep(0.5)  # Đợi animation menu
 
         # Tìm link biên lai
         bien_lai_link = wait.until(EC.element_to_be_clickable(
@@ -287,7 +287,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
 
         # Hover và click vào link biên lai
         actions.move_to_element(bien_lai_link).perform()
-        time.sleep(1)  # Đợi animation hover
+        time.sleep(0.5)  # Đợi animation hover
         send_notification("Đã hover vào link biên lai")
 
         actions.click().perform()
@@ -296,7 +296,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         # Nếu có số tờ khai, thực hiện tìm kiếm
         if so_tk:
             try:
-                time.sleep(3)  # Đợi trang load xong
+                time.sleep(2)  # Đợi trang load xong
                 so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
                 so_tk_input.clear()
                 so_tk_input.send_keys(so_tk)
@@ -309,7 +309,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
                 actions.click().perform()
                 send_notification("Đã nhấp nút tìm kiếm")
 
-                time.sleep(3)  # Đợi kết quả tìm kiếm
+                time.sleep(2)  # Đợi kết quả tìm kiếm
             except Exception as e:
                 send_notification(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}", "error")
                 raise

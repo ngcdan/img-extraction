@@ -2,28 +2,156 @@
 
 Dự án trích xuất thông tin từ file PDF theo mẫu chung bằng Layout-Parser.
 
-## Cài đặt
-1. Tạo và kích hoạt virtual environment:
+## Yêu cầu hệ thống
+
+### Windows
+- Python 3.8 trở lên
+- Google Chrome
+- SQL Server ODBC Driver 17
+- Tesseract-OCR
+
+### macOS
+- Python 3.8 trở lên
+- Google Chrome
+- SQL Server ODBC Driver 17
+- Tesseract-OCR
+- Homebrew (để cài đặt các dependencies)
+
+## Hướng dẫn cài đặt
+
+### Windows
+
+1. Cài đặt Python:
+   - Tải Python từ [python.org](https://www.python.org/downloads/)
+   - Trong quá trình cài đặt, đảm bảo tích chọn "Add Python to PATH"
+
+2. Cài đặt SQL Server ODBC Driver:
+   - Tải và cài đặt [ODBC Driver 17 for SQL Server](https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server)
+
+3. Cài đặt Tesseract-OCR:
+   - Tải Tesseract installer từ [GitHub](https://github.com/UB-Mannheim/tesseract/wiki)
+   - Chạy installer và ghi nhớ đường dẫn cài đặt (mặc định: `C:\Program Files\Tesseract-OCR`)
+   - Thêm đường dẫn Tesseract vào PATH của Windows
+
+4. Tạo và kích hoạt môi trường ảo:
    ```bash
    python -m venv env
-   source env/bin/activate
+   .\env\Scripts\activate
    ```
-2. Cài thư viện:
+
+5. Cài đặt các thư viện Python:
    ```bash
-   pip install "layoutparser[effdet,ocr]"
+   pip install -r requirements.txt
    ```
-3. Cài Tesseract-OCR (cho OCR):
+
+### macOS
+
+1. Cài đặt Homebrew (nếu chưa có):
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+
+2. Cài đặt Python:
+   ```bash
+   brew install python@3.8
+   ```
+
+3. Cài đặt SQL Server ODBC Driver:
+   ```bash
+   brew tap microsoft/mssql-release https://github.com/Microsoft/homebrew-mssql-release
+   brew update
+   brew install msodbcsql17
+   ```
+
+4. Cài đặt Tesseract-OCR:
    ```bash
    brew install tesseract
    ```
 
+5. Tạo và kích hoạt môi trường ảo:
+   ```bash
+   python3 -m venv env
+   source env/bin/activate
+   ```
+
+6. Cài đặt các thư viện Python:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## Cấu hình môi trường
+
+1. Tạo file `.env` từ mẫu:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Cập nhật các biến môi trường trong file `.env`:
+   - Thông tin kết nối database
+   - Cấu hình ứng dụng
+   - Đường dẫn Tesseract (nếu khác mặc định)
+   - API keys và các thông tin bảo mật khác
+
+3. Cài đặt dependencies:
+   ```bash
+   # Windows
+   pip install -r requirements.txt
+
+   # macOS
+   pip3 install -r requirements.txt
+   ```
+
+Lưu ý: File `.env` chứa thông tin nhạy cảm và đã được thêm vào `.gitignore`. Không commit file này lên repository.
+
+## Cấu hình ứng dụng
+
+1. Kiểm tra cài đặt Tesseract:
+   - Windows: Đảm bảo biến môi trường PATH chứa đường dẫn Tesseract
+   - macOS: Tesseract sẽ tự động được thêm vào PATH
+
+2. Cấu trúc thư mục:
+   ```
+   project/
+   ├── data/           # Thư mục chứa dữ liệu PDF
+   ├── downloaded_pdfs/# Thư mục lưu PDF đã tải
+   ├── env/           # Môi trường ảo Python
+   ├── templates/     # Templates HTML
+   └── ...
+   ```
+
+## Chạy ứng dụng
+
+1. Kích hoạt môi trường ảo:
+   - Windows: `.\env\Scripts\activate`
+   - macOS: `source env/bin/activate`
+
+2. Chạy ứng dụng:
+   ```bash
+   python app.py
+   ```
+
+3. Truy cập ứng dụng:
+   - Mở trình duyệt và truy cập: `http://localhost:8080`
+
 ## Ghi chú
-- Sử dụng EfficientDet để phân tích bố cục.
-- Tesseract hỗ trợ OCR cho PDF dạng ảnh.
+- Ứng dụng sẽ tự động mở Chrome với cấu hình debug
+- Đảm bảo đóng tất cả cửa sổ Chrome trước khi chạy ứng dụng
+- Kiểm tra quyền truy cập thư mục khi lưu file
+
+## Xử lý sự cố
+
+### Windows
+- Nếu gặp lỗi Tesseract: Kiểm tra PATH và cài đặt lại Tesseract
+- Lỗi ODBC: Đảm bảo đã cài đặt đúng phiên bản Driver 17
+
+### macOS
+- Lỗi quyền truy cập: Chạy với sudo nếu cần
+- Lỗi Tesseract: Cài đặt lại qua Homebrew
 
 ## Tài liệu tham khảo
 - [Layout-Parser Docs](https://layout-parser.readthedocs.io/)
-- [Tesseract Installation](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+- [Tesseract Documentation](https://tesseract-ocr.github.io/)
+- [SQL Server ODBC Documentation](https://learn.microsoft.com/en-us/sql/connect/odbc/microsoft-odbc-driver-for-sql-server)
 ```
 
 # Cài đặt paddlepaddle (CPU version)

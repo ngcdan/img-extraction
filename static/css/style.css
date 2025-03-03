@@ -225,3 +225,41 @@ input[type="text"]:focus {
 .input-group input {
   transition: all 0.3s ease;
 }
+
+#toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+}
+
+.toast {
+  padding: 15px 25px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+  color: white;
+  opacity: 0;
+  transform: translateX(100%);
+  transition: all 0.3s ease-in-out;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.toast.info {
+  background-color: #2196F3;
+}
+
+.toast.success {
+  background-color: #4CAF50;
+}
+
+.toast.warning {
+  background-color: #FF9800;
+}
+
+.toast.error {
+  background-color: #F44336;
+}

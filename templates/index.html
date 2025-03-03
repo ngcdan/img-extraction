@@ -38,7 +38,8 @@
       <div class="form-container"
         style="display: flex; flex-direction: column; align-items: center; max-width: 500px; margin: 0 auto;">
 
-        <div class="form-group">
+        <div class="form-group py-2">
+          <label>Job No: <span id="jobId_display" class="jobid-value me-2">...</span></label>
           <label>Hawb No: <span id="hawb_display" class="hawb-value">...</span></label>
         </div>
 
@@ -92,7 +93,55 @@
       <div id="message" class="message"></div>
     </div>
 
+    <div id="toast-container"></div>
+
+    <!-- Thêm Socket.IO client -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+
     <script>
+
+        // Kết nối Socket.IO với các options
+        const socket = io({
+            transports: ['websocket'],
+            cors: {
+                origin: "*",
+                methods: ["GET", "POST"]
+            }
+        });
+
+        // Xử lý sự kiện kết nối
+        socket.on('connect', function() {
+            console.log('Connected to server');
+        });
+
+        socket.on('connect_error', (error) => {
+            console.log('Connection error:', error);
+            showToast('Lỗi kết nối đến server', 'error');
+        });
+
+        // Hàm tạo và hiển thị toast
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+
+            container.appendChild(toast);
+
+            // Hiệu ứng hiển thị
+            setTimeout(() => toast.classList.add('show'), 100);
+
+            // Tự động ẩn sau 3 giây
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => container.removeChild(toast), 300);
+            }, 3000);
+        }
+
+        // Lắng nghe sự kiện notification từ server
+        socket.on('notification', function(data) {
+            showToast(data.message, data.type);
+        });
 
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('upload-file');
@@ -200,7 +249,8 @@ function uploadFile() {
       // Tự động điền thông tin vào form
       const usernameInput = document.getElementById('username');
       const soTkInput = document.getElementById('so_tk');
-      const hawb = document.getElementById('hawb');
+      const hawbDisplay = document.getElementById('hawb_display');
+      const jobIdDisplay = document.getElementById('jobId_display');
 
       if (data.data.tax_number) {
         usernameInput.value = data.data.tax_number;
@@ -214,13 +264,22 @@ function uploadFile() {
         setTimeout(() => soTkInput.classList.remove('filled'), 2000);
       }
 
+      // Hiển thị JobId nếu có
+      if (data.data.jobID) {
+        jobIdDisplay.textContent = data.data.hawb;
+        jobIdDisplay.classList.add('filled');
+        setTimeout(() => jobIdDisplay.classList.remove('filled'), 2000);
+      } else {
+        jobIdDisplay.textContent = '...';
+      }
+
       // Hiển thị HAWB nếu có
       if (data.data.hawb) {
         hawbDisplay.textContent = data.data.hawb;
         hawbDisplay.classList.add('filled');
         setTimeout(() => hawbDisplay.classList.remove('filled'), 2000);
       } else {
-        hawbDisplay.textContent = '[]';
+        hawbDisplay.textContent = '...';
       }
 
       showMessage('Đã điền thông tin từ file', 'success');
@@ -250,34 +309,44 @@ function useExtractedInfo() {
 }
 
     function startDownload() {
-        const username = document.getElementById('username').value;
-        const soTk = document.getElementById('so_tk').value;
-        const formData = new FormData();
-        formData.append('username', username);
-        if (soTk) {
-            formData.append('so_tk', soTk);
+        const username = document.getElementById('username').value.trim();
+        const so_tk = document.getElementById('so_tk').value.trim();
+
+        if (!username) {
+            showToast('Vui lòng nhập mã số thuế', 'error');
+            return;
         }
 
+        if (!/^\d+$/.test(username)) {
+            showToast('Mã số thuế chỉ được chứa số', 'error');
+            return;
+        }
+
+        // Hiển thị status container
+        document.getElementById('status').style.display = 'block';
+
+        // Gửi request
         fetch('/start', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                'username': username,
+                'so_tk': so_tk
+            })
         })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-            return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
             if (data.error) {
-                showMessage(data.error, 'error');
+                showToast(data.error, 'error');
             } else {
-                document.getElementById('status').style.display = 'block';
-                startStatusCheck();
+                showToast('Bắt đầu tải...', 'info');
             }
         })
         .catch(error => {
-            showMessage('Lỗi kết nối đến server: ' + error.message, 'error');
+            console.error('Error:', error);
+            showToast('Lỗi khi gửi yêu cầu', 'error');
         });
     }
 

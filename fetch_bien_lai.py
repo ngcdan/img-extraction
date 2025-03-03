@@ -181,9 +181,27 @@ def fill_login_info(driver, username, password, max_retries=3):
     """Điền thông tin đăng nhập với retry và explicit wait"""
     wait = WebDriverWait(driver, 10)  # Đợi tối đa 10 giây
     retry_count = 0
+    login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
 
     while retry_count < max_retries:
         try:
+            # Kiểm tra URL hiện tại
+            current_url = driver.current_url
+            if current_url != login_url:
+                print(f"URL hiện tại không phải trang đăng nhập: {current_url}")
+                # Tìm tab có URL đăng nhập
+                login_tab_found = False
+                for handle in driver.window_handles:
+                    driver.switch_to.window(handle)
+                    if driver.current_url == login_url:
+                        print("Đã tìm thấy tab đăng nhập")
+                        login_tab_found = True
+                        break
+
+                if not login_tab_found:
+                    print("Không tìm thấy tab đăng nhập")
+                    return False
+
             # Đợi cho đến khi form login xuất hiện
             wait.until(EC.presence_of_element_located((By.ID, "form-username")))
             wait.until(EC.element_to_be_clickable((By.ID, "form-username")))
@@ -208,8 +226,7 @@ def fill_login_info(driver, username, password, max_retries=3):
             print(f"Lần thử {retry_count}: Không tìm thấy form đăng nhập. Đang thử lại...")
 
             if retry_count < max_retries:
-                # Refresh trang và đợi 2 giây trước khi thử lại
-                driver.refresh()
+                driver.get(login_url)  # Refresh về trang đăng nhập
                 time.sleep(2)
             else:
                 print(f"Lỗi sau {max_retries} lần thử: {str(e)}")
@@ -305,10 +322,11 @@ def get_file_info(driver, link_element):
 def download_pdf(driver, link_element):
     try:
         href = link_element.get_attribute('href')
+        # Lưu lại handle của tab hiện tại
+        current_handle = driver.current_window_handle
+
         # Tìm row chứa link (đi ngược lên từ thẻ a đến tr)
         row = link_element.find_element(By.XPATH, "./ancestor::tr")
-
-        # Lấy tất cả các cột trong row
         columns = row.find_elements(By.TAG_NAME, "td")
 
         # Lấy giá trị từ cột thứ 5 và 6 (index 4 và 5)
@@ -369,18 +387,15 @@ def download_pdf(driver, link_element):
 
         print(f"Đã tải và lưu file: {full_path}")
 
+        # Chỉ đóng tab và switch về tab gốc sau khi đã lưu file thành công
         driver.close()
-        driver.switch_to.window(driver.window_handles[-1])
+        driver.switch_to.window(current_handle)
 
         return True
 
     except Exception as e:
         print(f"Lỗi khi tải PDF: {e}")
-        try:
-            driver.close()
-            driver.switch_to.window(driver.window_handles[-1])
-        except:
-            pass
+        # Trong trường hợp lỗi, không tự động đóng tab
         return False
 
 if __name__ == "__main__":

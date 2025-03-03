@@ -54,3 +54,15 @@ captcha_50.png	GJIVR
 captcha_51.png	WETBH
 captcha_52.png	YELBS
 captcha_53.png	NCULM
+captcha_54.png	MIPPQ
+captcha_55.png	LIUZG
+captcha_55.png	LIUZG
+captcha_56.png	KETUB
+captcha_57.png	EUVLF
+captcha_58.png	VMDLN
+captcha_59.png	MDSIL
+captcha_60.png	ACDEC
+captcha_61.png	GTDUI
+captcha_62.png	VSWPD
+captcha_63.png	VSWPD
+captcha_64.png	UUPDQ

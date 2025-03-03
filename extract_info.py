@@ -2,6 +2,78 @@ from pdfminer.high_level import extract_text
 import re
 import os
 import pyodbc
+from openpyxl import load_workbook
+from datetime import datetime
+import json
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+def append_to_excel(extracted_info):
+    """Thêm thông tin vào file Excel template"""
+    try:
+        # Mở file Excel
+        excel_path = "./downloaded_pdfs/template_updated.xlsx"
+        wb = load_workbook(excel_path)
+        ws = wb.active
+
+        # Đếm số dòng hiện tại
+        current_row = ws.max_row
+
+        # Lấy danh sách items
+        print("Extracted info:", json.dumps(extracted_info, indent=2, ensure_ascii=False))
+        line_items = extracted_info.get('line_items', {}).get('items', [])
+        if not line_items:
+            print("Không có thông tin container để thêm vào Excel")
+            return False
+
+        # Thêm từng dòng cho mỗi item
+        for line in line_items:
+            # Tăng STT
+            current_row += 1
+
+            # Chuẩn bị dữ liệu cố định
+            fixed_data = {
+                'service_code': 'CL014920',
+                'vendor': 'VETC',
+                'charge_code': 'B_EWF',
+                'description': 'EXPRESS WAY FEES',
+                'unit': 'shipment'
+            }
+
+            # Tạo row data
+            row_data = [
+                current_row - 1,  # STT
+                extracted_info.get('so_ct', ''),  # Số chứng từ
+                fixed_data['service_code'],  # CL014920
+                fixed_data['vendor'],  # VETC
+                extracted_info.get('jobID', ''),  # JobID
+                extracted_info.get('hawb', ''),  # HAWB
+                fixed_data['charge_code'],  # B_EWF
+                fixed_data['description'],  # EXPRESS WAY FEES
+                line['quantity'],  # Số lượng
+                fixed_data['unit'],  # shipment
+                line['unit_price'],  # Đơn giá
+                '',  # Cột 12 để trống
+                line['total'],  # Thành tiền
+                '', '', '', '', '', '', '',  # Cột 14-20 để trống
+                line['container_no'],  # Số container
+                line['label']  # Loại container
+            ]
+
+            # Thêm dữ liệu vào worksheet
+            for col, value in enumerate(row_data, 1):
+                ws.cell(row=current_row, column=col, value=value)
+
+        # Lưu file
+        wb.save(excel_path)
+        print(f"Đã thêm {len(line_items)} dòng vào file Excel")
+        return True
+
+    except Exception as e:
+        print(f"Lỗi khi thêm dữ liệu vào Excel: {str(e)}")
+        return False
 
 def extract_text_from_pdf(pdf_path):
     """Trích xuất văn bản từ file PDF."""
@@ -152,36 +224,182 @@ def validate_customs_number(number):
     if not number.isdigit():
         return False
 
-    # Có thể thêm các quy tắc kiểm tra khác
-    # Ví dụ: kiểm tra prefix, format date trong số tờ khai, etc.
-
     return True
+
+def count_lines(text):
+    """Đếm số lines dựa trên format chuẩn"""
+    lines = text.split('\n')
+    try:
+        # Tìm vị trí của "STT" và "Biểu cước"
+        stt_index = next(i for i, line in enumerate(lines) if line.strip() == "STT")
+        bieu_cuoc_index = next(i for i, line in enumerate(lines) if line.strip() == "Biểu cước")
+
+        # Đếm số số thứ tự giữa "STT" và "Biểu cước"
+        numbers = []
+        for line in lines[stt_index:bieu_cuoc_index]:
+            if line.strip().isdigit():
+                numbers.append(int(line.strip()))
+
+        return len(numbers)
+    except Exception as e:
+        print(f"Lỗi khi đếm số lines: {str(e)}")
+        return 0
+
+def extract_items(text):
+    """Trích xuất thông tin container từ văn bản"""
+    try:
+        lines = text.split('\n')
+        num_lines = count_lines(text)
+        if num_lines == 0:
+            return None
+
+        # Tìm vị trí bắt đầu của thông tin
+        start_index = -1
+        for i, line in enumerate(lines):
+            if "(7) = (5)*(6)" in line:
+                start_index = i + 1
+                break
+
+        if start_index == -1:
+            return None
+
+        # Khởi tạo list để lưu thông tin các lines
+        container_items = []
+        current_index = start_index
+
+        # Đọc từng block thông tin
+        while current_index < len(lines):
+            try:
+                item = {}
+
+                # Đọc label (Container...)
+                while current_index < len(lines):
+                    line = lines[current_index].strip()
+                    if line and "Container" in line:
+                        item['label'] = line
+                        current_index += 1
+                        break
+                    current_index += 1
+
+                # Nếu không tìm thấy label, thoát khỏi vòng lặp
+                if 'label' not in item:
+                    break
+
+                # Đọc container number
+                while current_index < len(lines):
+                    line = lines[current_index].strip()
+                    if line:
+                        item['container_no'] = line
+                        current_index += 1
+                        break
+                    current_index += 1
+
+                # Bỏ qua "Đồng/Container"
+                while current_index < len(lines):
+                    line = lines[current_index].strip()
+                    if line == "Đồng/Container":
+                        current_index += 1
+                        break
+                    current_index += 1
+
+                # Đọc unit price
+                while current_index < len(lines):
+                    line = lines[current_index].strip()
+                    if line and any(c.isdigit() for c in line):
+                        item['unit_price'] = convert_price_to_number(line)
+                        current_index += 1
+                        break
+                    current_index += 1
+
+                # Đọc quantity
+                while current_index < len(lines):
+                    line = lines[current_index].strip()
+                    if line and line.isdigit():
+                        item['quantity'] = int(line)
+                        current_index += 1
+                        break
+                    current_index += 1
+
+                # Đọc total
+                while current_index < len(lines):
+                    line = lines[current_index].strip()
+                    if line and any(c.isdigit() for c in line):
+                        item['total'] = convert_price_to_number(line)
+                        current_index += 1
+                        break
+                    current_index += 1
+
+                # Kiểm tra xem đã có đủ thông tin chưa
+                required_fields = ['label', 'container_no', 'unit_price', 'quantity', 'total']
+                if all(field in item for field in required_fields):
+                    container_items.append(item)
+
+                # Kiểm tra nếu đã đủ số lines
+                if len(container_items) >= num_lines:
+                    break
+
+            except Exception as e:
+                print(f"Lỗi khi xử lý item: {str(e)}")
+                continue
+
+        # Kiểm tra kết quả
+        if not container_items:
+            print("Không tìm thấy thông tin container hợp lệ")
+            return None
+
+        return {
+            'num_lines': len(container_items),
+            'items': container_items,
+            'total_amount': sum(item['total'] for item in container_items)
+        }
+
+    except Exception as e:
+        print(f"Lỗi khi trích xuất thông tin container: {str(e)}")
+        return None
+
+def convert_price_to_number(price_str):
+    """Chuyển đổi chuỗi giá tiền sang số"""
+    try:
+        # Loại bỏ dấu chấm và phẩy
+        return int(price_str.replace('.', '').replace(',', ''))
+    except:
+        return 0
 
 def process_file_content(text):
     """Xử lý nội dung văn bản và trả về thông tin trích xuất"""
-    tax_number = extract_tax_number(text)
-    customs_number = extract_customs_declaration(text)
-    date = extract_date_by_lines(text)
+    text_copy = text[:]
+    so_ct = extract_so_ct_by_lines(text_copy)
+    text_copy = text[:]
+    tax_number = extract_tax_number(text_copy)
+    text_copy = text[:]
+    customs_number = extract_customs_declaration(text_copy)
+    text_copy = text[:]
+    date = extract_date_by_lines(text_copy)
+    text_copy = text[:]
+    line_items = extract_items(text_copy)
+    print("Extracted items:", json.dumps(line_items, indent=2, ensure_ascii=False))
 
     return {
+        'so_ct': so_ct,
         'tax_number': tax_number,
         'customs_number': customs_number,
-        'date': date
+        'date': date,
+        'line_items': line_items
     }
 
 # Hàm tạo kết nối SQL Server và thực hiện truy vấn
 def query_customs_info(customs_number):
     """Tạo kết nối SQL Server và truy vấn thông tin dựa trên số tờ khai"""
     try:
-        # Chuỗi kết nối SQL Server
+        # Chuỗi kết nối SQL Server từ biến môi trường
         conn_str = (
-            "DRIVER={ODBC Driver 17 for SQL Server};"
-            "SERVER=of1.beelogistics.com,34541;"
-            "DATABASE=BEE_DB;"
-            "UID=devhph;"
-            "PWD=Hph@dev!@#123;"
-            "Encrypt=yes;"
-            "TrustServerCertificate=yes;"
+            f"DRIVER={{{os.getenv('DB_DRIVER')}}};"
+            f"SERVER={os.getenv('DB_SERVER')};"
+            f"DATABASE={os.getenv('DB_NAME')};"
+            f"UID={os.getenv('DB_USER')};"
+            f"PWD={os.getenv('DB_PASSWORD')};"
+            f"Encrypt={os.getenv('DB_ENCRYPT')};"
+            f"TrustServerCertificate={os.getenv('DB_TRUST_SERVER_CERTIFICATE')};"
         )
 
         # Tạo kết nối
@@ -221,7 +439,8 @@ def query_customs_info(customs_number):
 def main():
 
     # Giả lập việc trích xuất từ PDF
-    pdf_path = "data/2.pdf"
+    pdf_path = "data/BLHPH005202.pdf"
+    # pdf_path = "data/2.pdf"
     text = extract_text_from_pdf(pdf_path)
 
     if text:
@@ -233,6 +452,8 @@ def main():
         tax_number = extract_tax_number(text)
         print("Tax Code:", tax_number)
         customs_number = extract_customs_declaration(text)
+        items = extract_items(text)
+        print("Items:", items)
         if customs_number:
             print("Số tờ khai hải quan:", customs_number)
             # Thực hiện truy vấn SQL với số tờ khai

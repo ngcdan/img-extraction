@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 import threading
 from flask_cors import CORS
+from flask_socketio import SocketIO
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -10,24 +11,30 @@ import time
 import os
 import platform
 import subprocess
-import threading
 from selenium.webdriver.chrome.options import Options
 import PyPDF2
 import io
-from extract_info import process_file_content, query_customs_info
+from extract_info import process_file_content, query_customs_info, append_to_excel
 from pdfminer.high_level import extract_text
 from datetime import datetime
 from fetch_bien_lai import navigate_to_login, get_chrome_driver, fill_login_info, navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
+import json
+import requests
 
 app = Flask(__name__)
+# Cấu hình CORS cho cả Flask và Socket.IO
+CORS(app, resources={r"/*": {"origins": "*"}})
+socketio = SocketIO(app,
+    cors_allowed_origins="*",
+    async_mode='threading'
+)
 
-CORS(app, resources={
-    r"/*": {
-        "origins": "*",
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"]
-    }
-})
+def send_notification(message, type="info"):
+    """Gửi thông báo đến client"""
+    socketio.emit('notification', {
+        'message': message,
+        'type': type  # info, success, warning, error
+    })
 
 # Biến global để lưu trạng thái
 driver = None
@@ -43,7 +50,7 @@ def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
     global driver
     try:
-        print("Đang khởi tạo Chrome driver...")
+        send_notification("Đang khởi tạo Chrome driver...", "info")
 
         # Xác định đường dẫn profile mặc định của Chrome
         if platform.system() == 'Windows':
@@ -51,7 +58,7 @@ def initialize_chrome():
         else:  # macOS
             default_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
 
-        # Khởi động Chrome với profile mặc định và debug port
+        # Xác định đường dẫn Chrome
         if platform.system() == 'Windows':
             chrome_path = 'C:\\Program Files\\Google Chrome\\chrome.exe'
             if not os.path.exists(chrome_path):
@@ -59,59 +66,69 @@ def initialize_chrome():
         else:  # macOS
             chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
-        # Khởi động Chrome với các tham số
-        subprocess.Popen([
-            chrome_path,
-            f'--user-data-dir={default_profile}',
-            '--remote-debugging-port=9222',
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--start-maximized',
-            'http://localhost:8080'  # Mở trực tiếp trang web của app
-        ])
+        # Kiểm tra xem Chrome có đang chạy với debug port không
+        chrome_running = False
+        try:
+            response = requests.get('http://127.0.0.1:9222/json/version')
+            if response.status_code == 200:
+                chrome_running = True
+                send_notification("Đã tìm thấy Chrome đang chạy với debug port", "info")
+        except:
+            send_notification("Khởi động Chrome mới với debug port...", "info")
 
-        print("Đang đợi Chrome khởi động...")
-        time.sleep(3)
+        if not chrome_running:
+            # Khởi động Chrome mới mà không cần tắt các instance hiện tại
+            subprocess.Popen([
+                chrome_path,
+                f'--user-data-dir={default_profile}',
+                '--remote-debugging-port=9222',
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--start-maximized',
+                '--disable-gpu',
+                '--disable-dev-shm-usage',
+                'about:blank'
+            ])
+            time.sleep(3)  # Đợi Chrome khởi động
 
-        # Kết nối với Chrome đang chạy
+        # Kết nối với Chrome debug port
         chrome_options = Options()
         chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-        driver = webdriver.Chrome(options=chrome_options)
 
-        print("Đã kết nối với Chrome thành công")
-
-        # Mở trang đăng nhập trong tab mới
-        driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
-        time.sleep(1)
-        driver.switch_to.window(driver.window_handles[-1])
-
-        # Đợi trang load xong
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
-        print("Đã mở trang đăng nhập thành công")
-        return True
+        try:
+            driver = webdriver.Chrome(options=chrome_options)
+            send_notification("Đã kết nối với Chrome thành công", "success")
+            return True
+        except Exception as e:
+            error_message = f"Lỗi khi kết nối với Chrome: {str(e)}"
+            send_notification(error_message, "error")
+            return False
 
     except Exception as e:
-        print(f"Lỗi khi khởi tạo Chrome và mở web: {e}")
+        error_message = f"Lỗi khi khởi tạo Chrome: {str(e)}"
+        send_notification(error_message, "error")
         return False
 
 def process_download(username, so_tk=None):
     global driver, download_status
     try:
-        try:
-            # Mở trang đăng nhập
-            navigate_to_login(driver)
+        # Lưu handle của tab hiện tại
+        current_handle = driver.current_window_handle
 
-            # Đăng nhập
-            if fill_login_info(driver, username, username):
-                print("Đăng nhập thành công")
-            else:
-                raise Exception("Không thể đăng nhập")
+        # Mở trang đăng nhập trong tab mới
+        driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
+        time.sleep(1)
 
-        except Exception as e:
-            print(f"Lỗi trong quá trình đăng nhập: {str(e)}")
-            # Xử lý lỗi phù hợp
+        # Chuyển đến tab mới
+        # new_handle = driver.window_handles[-1]
+        # driver.switch_to.window(new_handle)
+
+        # Đăng nhập
+        if fill_login_info(driver, username, username):
+            print("Đăng nhập thành công")
+            send_notification("Đăng nhập thành công", "success")
+        else:
+            raise Exception("Không thể đăng nhập")
 
         # Thêm script theo dõi captcha
         js_script = """
@@ -120,14 +137,16 @@ def process_download(username, so_tk=None):
             return window.captchaValue;
         };
         const captchaInput = document.getElementById('CaptchaInputText');
-        captchaInput.addEventListener('blur', function() {
-            window.captchaValue = this.value;
-        });
-        captchaInput.addEventListener('input', function() {
-            if (this.value.length >= 5) {
+        if (captchaInput) {
+            captchaInput.addEventListener('blur', function() {
                 window.captchaValue = this.value;
-            }
-        });
+            });
+            captchaInput.addEventListener('input', function() {
+                if (this.value.length >= 5) {
+                    window.captchaValue = this.value;
+                }
+            });
+        }
         """
         driver.execute_script(js_script)
 
@@ -180,13 +199,12 @@ def process_download(username, so_tk=None):
                 time.sleep(1)
 
         download_status['status'] = 'completed'
-        # Đóng các tab không cần thiết
-        close_specific_tabs("thuphi.haiphong.gov.vn:8222")
 
     except Exception as e:
+        error_msg = f"Lỗi: {str(e)}"
+        print(error_msg)
+        send_notification(error_msg, "error")
         download_status['status'] = 'error'
-        print(f"Lỗi: {str(e)}")
-        close_specific_tabs("thuphi.haiphong.gov.vn:8222")
 
 @app.route('/')
 def index():
@@ -196,19 +214,20 @@ def index():
 def start_download():
     global driver, download_status
 
-    username = request.form.get('username')
-    if not username or not username.strip().isdigit():
-        return jsonify({'error': 'Mã số thuế không hợp lệ'})
-
-    so_tk = request.form.get('so_tk')
     try:
-        # Khởi tạo driver nếu chưa có
-        if not driver:
-            driver = get_chrome_driver()
-            if not driver:
+        username = request.form.get('username')
+        if not username or not username.strip().isdigit():
+            return jsonify({'error': 'Mã số thuế không hợp lệ'})
+
+        so_tk = request.form.get('so_tk')
+
+        # Khởi tạo driver nếu chưa có hoặc đã bị đóng
+        if driver is None or (hasattr(driver, 'service') and not driver.service.is_connectable()):
+            success = initialize_chrome()
+            if not success:
                 return jsonify({'error': 'Không thể khởi tạo Chrome'})
 
-        # Bắt đầu process download trong thread riêng
+        # Reset trạng thái download
         download_status = {
             'total': 0,
             'current': 0,
@@ -217,14 +236,20 @@ def start_download():
             'status': 'running'
         }
 
-        thread = threading.Thread(target=process_download, args=(username, so_tk))
-        thread.daemon = True
-        thread.start()
+        # Bắt đầu process download trong thread riêng
+        download_thread = threading.Thread(
+            target=process_download,
+            args=(username, so_tk)
+        )
+        download_thread.daemon = True
+        download_thread.start()
 
-        return jsonify({'message': 'Đã bắt đầu tải'})
+        return jsonify({'status': 'started'})
 
     except Exception as e:
-        return jsonify({'error': str(e)})
+        error_message = f"Lỗi khi bắt đầu tải: {str(e)}"
+        send_notification(error_message, "error")
+        return jsonify({'error': error_message})
 
 @app.route('/status')
 def get_status():
@@ -268,10 +293,17 @@ def upload_file():
 
             # Kiểm tra kết quả và lấy HWBNO
             if results and len(results) > 0:
+                extracted_info['jobID'] = results[0].TransID
                 extracted_info['hawb'] = results[0].HWBNO
+                extracted_info['nguoiKhai'] = results[0].nguoi_khai
             else:
-                extracted_info['hawb'] = None
+                extracted_info['jobID'] = ''
+                extracted_info['hawb'] = ''
+                extracted_info['nguoiKhai'] = ''
 
+            # Thêm dữ liệu vào Excel
+            # Lấy danh sách items
+            excel_success = append_to_excel(extracted_info)
 
             # Tạo các thư mục nếu chưa tồn tại
             for directory in [base_dir, date_dir, so_tk_dir]:
@@ -353,9 +385,6 @@ def cleanup():
     global driver
     if driver:
         try:
-            # Đóng các tab cụ thể trước
-            close_specific_tabs("thuphi.haiphong.gov.vn:8222")
-            # Đóng Chrome driver
             driver.quit()
         except:
             pass
@@ -364,7 +393,7 @@ def cleanup():
 def open_browser():
     """Mở trình duyệt mặc định với trang web của app"""
     import webbrowser
-    webbrowser.open('http://localhost:8080')
+    webbrowser.open('http://localhost:8080')  # Đổi port ở đây
 
 if __name__ == '__main__':
     try:
@@ -380,8 +409,13 @@ if __name__ == '__main__':
         # Mở trình duyệt sau 2 giây
         threading.Timer(2.0, open_browser).start()
 
-        # Chạy Flask app
-        app.run(host='0.0.0.0', port=8080, debug=False)  # Tắt debug mode
+        # Chạy Flask app với port 8080
+        socketio.run(app,
+            host='0.0.0.0',
+            port=8080,  # Đổi port ở đây
+            debug=False,
+            allow_unsafe_werkzeug=True
+        )
 
     except Exception as e:
         print(f"Lỗi khi khởi động app: {e}")

@@ -1,14 +1,124 @@
-from pdfminer.high_level import extract_text
-import re
 import os
-import pyodbc
-from openpyxl import load_workbook
-from datetime import datetime
 import json
-from dotenv import load_dotenv
+import re
+import pyodbc
+import io
+from datetime import datetime
+from openpyxl import load_workbook
+from pdfminer.high_level import extract_text
+from utils import send_notification
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from time import sleep
+from tenacity import retry, stop_after_attempt, wait_exponential
 
-# Load environment variables
-load_dotenv()
+def append_to_google_sheet(extracted_info):
+    """Thêm thông tin vào Google Sheet với retry logic"""
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        retry=lambda e: isinstance(e, HttpError) and e.resp.status_code in [500, 503]
+    )
+    def execute_append(sheet, values, spreadsheet_id, range_name):
+        body = {'values': values}
+        return sheet.values().append(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            valueInputOption='USER_ENTERED',
+            body=body
+        ).execute()
+
+    try:
+        # Cấu hình credentials
+        SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+        SERVICE_ACCOUNT_FILE = './service-account-key.json'
+        SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
+        RANGE_NAME = 'main!A:V'
+
+        # Kiểm tra file credentials tồn tại
+        if not os.path.exists(SERVICE_ACCOUNT_FILE):
+            send_notification("File service account không tồn tại", "error")
+            return False
+
+        # Khởi tạo credentials
+        try:
+            creds = service_account.Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+        except Exception as e:
+            send_notification(f"Lỗi khởi tạo credentials: {str(e)}", "error")
+            return False
+
+        # Khởi tạo service
+        try:
+            service = build('sheets', 'v4', credentials=creds)
+            sheet = service.spreadsheets()
+        except Exception as e:
+            send_notification(f"Lỗi khởi tạo Google Sheets service: {str(e)}", "error")
+            return False
+
+        # Validate input data
+        line_items = extracted_info.get('line_items', {}).get('items', [])
+        if not line_items:
+            send_notification("Không có thông tin container để thêm vào Sheet", "warning")
+            return False
+
+        # Lấy số dòng hiện tại với retry
+        try:
+            result = sheet.values().get(
+                spreadsheetId=SPREADSHEET_ID,
+                range=RANGE_NAME
+            ).execute()
+            current_row = len(result.get('values', [])) + 1
+        except HttpError as e:
+            send_notification(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}", "error")
+            return False
+
+        # Chuẩn bị dữ liệu
+        values = []
+        for line in line_items:
+            fixed_data = {
+                'service_code': 'CL014920',
+                'vendor': 'VETC',
+                'charge_code': 'B_EWF',
+                'description': 'EXPRESS WAY FEES',
+                'unit': 'shipment'
+            }
+
+            row_data = [
+                current_row,  # STT
+                extracted_info.get('so_ct', ''),  # Số chứng từ
+                fixed_data['service_code'],
+                fixed_data['vendor'],
+                extracted_info.get('jobID', ''),
+                extracted_info.get('hawb', ''),
+                fixed_data['charge_code'],
+                fixed_data['description'],
+                line.get('quantity', ''),
+                fixed_data['unit'],
+                line.get('unit_price', ''),
+                '',  # Cột 12 để trống
+                line.get('total', ''),
+                '', '', '', '', '', '', '',  # Cột 14-20 để trống
+                line.get('container_no', ''),
+                line.get('label', '')
+            ]
+            values.append(row_data)
+            current_row += 1
+
+        # Thực hiện append với retry
+        try:
+            execute_append(sheet, values, SPREADSHEET_ID, RANGE_NAME)
+            send_notification(f"Đã thêm {len(line_items)} dòng vào Google Sheet", "success")
+            return True
+        except Exception as e:
+            send_notification(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}", "error")
+            return False
+
+    except Exception as e:
+        send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
+        return False
 
 def append_to_excel(extracted_info):
     """Thêm thông tin vào file Excel template"""
@@ -52,14 +162,14 @@ def append_to_excel(extracted_info):
                 extracted_info.get('hawb', ''),  # HAWB
                 fixed_data['charge_code'],  # B_EWF
                 fixed_data['description'],  # EXPRESS WAY FEES
-                line['quantity'],  # Số lượng
+                line.get('quantity', ''),  # Số lượng
                 fixed_data['unit'],  # shipment
-                line['unit_price'],  # Đơn giá
+                line.get('unit_price', ''),  # Đơn giá
                 '',  # Cột 12 để trống
-                line['total'],  # Thành tiền
+                line.get('total', ''),  # Thành tiền
                 '', '', '', '', '', '', '',  # Cột 14-20 để trống
-                line['container_no'],  # Số container
-                line['label']  # Loại container
+                line.get('container_no', ''),  # Số container
+                line.get('label', '')  # Loại container
             ]
 
             # Thêm dữ liệu vào worksheet
@@ -209,6 +319,18 @@ def extract_customs_declaration(text):
             break
 
     return None
+
+def extract_total_amount(text):
+    """Trích xuất tổng số tiền từ văn bản"""
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        if "Tổng cộng tiền phải nộp:" in line:
+            # Lấy số tiền ở dòng tiếp theo
+            if i + 1 < len(lines):
+                amount_str = lines[i + 1].strip()
+                # Chuyển đổi chuỗi tiền thành số
+                return convert_price_to_number(amount_str)
+    return 0
 
 # Thêm hàm kiểm tra định dạng số tờ khai
 def validate_customs_number(number):
@@ -365,27 +487,105 @@ def convert_price_to_number(price_str):
     except:
         return 0
 
-def process_file_content(text):
-    """Xử lý nội dung văn bản và trả về thông tin trích xuất"""
-    text_copy = text[:]
-    so_ct = extract_so_ct_by_lines(text_copy)
-    text_copy = text[:]
-    tax_number = extract_tax_number(text_copy)
-    text_copy = text[:]
-    customs_number = extract_customs_declaration(text_copy)
-    text_copy = text[:]
-    date = extract_date_by_lines(text_copy)
-    text_copy = text[:]
-    line_items = extract_items(text_copy)
-    print("Extracted items:", json.dumps(line_items, indent=2, ensure_ascii=False))
+def process_file_content(file):
+    """
+    Xử lý file upload, đọc nội dung và trích xuất thông tin
 
-    return {
-        'so_ct': so_ct,
-        'tax_number': tax_number,
-        'customs_number': customs_number,
-        'date': date,
-        'line_items': line_items
-    }
+    Args:
+        file: FileStorage object từ request.files
+
+    Returns:
+        dict: Chứa thông tin trích xuất và đường dẫn file đã lưu
+    """
+    try:
+        if not file or not file.filename:
+            raise ValueError('File không hợp lệ')
+
+        print(f"Đang xử lý file: {file.filename}")
+
+        # Đọc và xử lý nội dung file
+        if file.filename.endswith('.pdf'):
+            file_bytes = io.BytesIO(file.read())
+            text = extract_text(file_bytes)
+            file_content = file_bytes.getvalue()
+        else:
+            text = file.read().decode('utf-8')
+            file_content = text.encode('utf-8')
+
+        # Trích xuất thông tin cơ bản
+        extracted_info = {
+            'so_ct': extract_so_ct_by_lines(text[:]),
+            'tax_number': extract_tax_number(text[:]),
+            'date': extract_date_by_lines(text[:]),
+            'customs_number': extract_customs_declaration(text[:]),
+            'total_amount': extract_total_amount(text[:]),
+            'line_items': extract_items(text[:])
+        }
+
+        # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
+        ngay_formatted = extracted_info['date'].replace('/', '')
+
+        # Tạo cấu trúc thư mục
+        base_dir = "downloaded_pdfs"
+        date_dir = os.path.join(base_dir, ngay_formatted)
+        so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
+
+        # Query thông tin customs
+        results = query_customs_info(extracted_info['customs_number'])
+
+        # Cập nhật thông tin bổ sung
+        if results and len(results) > 0:
+            extracted_info.update({
+                'jobID': results[0].TransID,
+                'hawb': results[0].HWBNO,
+                'nguoiKhai': results[0].nguoi_khai
+            })
+        else:
+            extracted_info.update({
+                'jobID': '',
+                'hawb': '',
+                'nguoiKhai': ''
+            })
+
+        # Tạo các thư mục nếu chưa tồn tại
+        for directory in [base_dir, date_dir, so_tk_dir]:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+                print(f"Đã tạo thư mục: {directory}")
+
+        # Xử lý tên file và đường dẫn
+        full_path = os.path.join(so_tk_dir, file.filename)
+        if os.path.exists(full_path):
+            base_name, ext = os.path.splitext(file.filename)
+            counter = 1
+            while os.path.exists(full_path):
+                new_filename = f"{base_name}_{counter}{ext}"
+                full_path = os.path.join(so_tk_dir, new_filename)
+                counter += 1
+
+        # Lưu file
+        with open(full_path, 'wb') as f:
+            f.write(file_content)
+
+        print(f"Đã lưu file: {full_path}")
+
+        # Thêm dữ liệu vào Google Sheet
+        google_sheet_success = append_to_google_sheet(extracted_info)
+
+        return {
+            'success': True,
+            'message': 'Trích xuất và lưu file thành công',
+            'data': extracted_info,
+            'saved_path': full_path,
+            'google_sheet_status': google_sheet_success
+        }
+
+    except Exception as e:
+        print(f"Lỗi khi xử lý file: {str(e)}")
+        return {
+            'success': False,
+            'error': f'Lỗi khi xử lý file: {str(e)}'
+        }
 
 # Hàm tạo kết nối SQL Server và thực hiện truy vấn
 def query_customs_info(customs_number):
@@ -433,7 +633,7 @@ def query_customs_info(customs_number):
             return None
 
     except pyodbc.Error as e:
-        print(f"Lỗi khi kết nối hoặc truy vấn cơ sở dữ liệu: {e}")
+        send_notification(f"Lỗi khi kết nối hoặc truy vấn cơ sở dữ liệu: {str(e)}", "error")
         return None
 
 def main():

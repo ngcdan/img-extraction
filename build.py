@@ -20,10 +20,7 @@ def clean_build():
 
 def build_app():
     """Build ứng dụng với PyInstaller"""
-    # Đường dẫn tới thư mục hiện tại
     current_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Xác định separator dựa trên hệ điều hành
     separator = ';' if platform.system() == 'Windows' else ':'
 
     # Danh sách các file và thư mục cần được bundle
@@ -38,14 +35,30 @@ def build_app():
     params = [
         'app.py',                    # Main script
         '--name=ImgExtraction',      # Tên file exe/binary
-        '--onefile',                 # Đóng gói thành một file duy nhất
         '--clean',                   # Xóa cache trước khi build
         '--noconfirm',               # Không hỏi xác nhận khi xóa
     ]
 
-    # Thêm console tùy theo môi trường
+    # Cấu hình theo hệ điều hành
     if platform.system() == 'Windows':
-        params.append('--noconsole')  # Ẩn console trên Windows
+        params.extend([
+            '--onefile',             # Đóng gói thành một file duy nhất cho Windows
+            '--noconsole',           # Ẩn console trên Windows
+            '--win-private-assemblies',
+        ])
+        # Thêm icon cho Windows
+        icon_path = os.path.join(current_dir, 'static', 'favicon.ico')
+        if os.path.exists(icon_path):
+            params.append(f'--icon={icon_path}')
+    else:  # macOS
+        params.extend([
+            '--onefile',             # Đóng gói thành một file duy nhất cho macOS
+            '--windowed',            # Tạo app bundle cho macOS
+        ])
+        # Thêm icon cho macOS
+        icon_path = os.path.join(current_dir, 'static', 'favicon.icns')
+        if os.path.exists(icon_path):
+            params.append(f'--icon={icon_path}')
 
     # Thêm data files
     for src, dst in additional_files:
@@ -53,13 +66,7 @@ def build_app():
         if os.path.exists(src_path):
             params.append(f'--add-data={src}{separator}{dst}')
 
-    # Thêm icon cho Windows
-    if platform.system() == 'Windows':
-        icon_path = os.path.join(current_dir, 'static', 'favicon.ico')
-        if os.path.exists(icon_path):
-            params.append(f'--icon={icon_path}')
-
-    # Thêm các hidden imports
+    # Thêm các hidden imports cho Flask và dependencies
     hidden_imports = [
         'engineio.async_drivers.threading',
         'flask_socketio',
@@ -92,11 +99,20 @@ def build_app():
     # Chạy PyInstaller
     PyInstaller.__main__.run(params)
 
+def post_build():
+    """Xử lý sau khi build"""
+    if platform.system() == 'Darwin':  # macOS
+        app_path = os.path.join('dist', 'ImgExtraction')
+        if os.path.exists(app_path):
+            os.chmod(app_path, 0o755)
+            print("Đã cập nhật quyền thực thi cho file binary")
+
 if __name__ == '__main__':
     try:
         print(f"Đang build cho hệ điều hành: {platform.system()}")
         clean_build()
         build_app()
+        post_build()
         print("Build thành công!")
     except Exception as e:
         print(f"Lỗi trong quá trình build: {str(e)}")

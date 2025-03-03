@@ -27,5 +27,3 @@ rapidfuzz>=2.0.0
 # Windows specific
 pywin32==305; sys_platform == 'win32'
 
-# macOS specific
-tkinter; sys_platform == 'darwin'

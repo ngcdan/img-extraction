@@ -5,13 +5,15 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 import platform
 import requests
 import subprocess
 import time
 import os
 import base64
-from utils import send_notification
+from utils import send_notification, get_download_directory
 from extract_info import update_last_row_sheet
 
 def initialize_chrome():
@@ -62,13 +64,32 @@ def initialize_chrome():
         chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
 
         try:
-            driver = webdriver.Chrome(options=chrome_options)
+            # Sử dụng webdriver_manager với cấu hình đơn giản hơn
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
             send_notification("Đã kết nối với Chrome thành công", "success")
             return driver
         except Exception as e:
-            error_message = f"Lỗi khi kết nối với Chrome: {str(e)}"
-            send_notification(error_message, "error")
-            return None
+            # Thử phương án dự phòng với ChromeDriver local
+            try:
+                if platform.system() == 'Windows':
+                    chromedriver_path = "./chromedriver.exe"
+                else:
+                    chromedriver_path = "./chromedriver"
+
+                if os.path.exists(chromedriver_path):
+                    service = Service(executable_path=chromedriver_path)
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                    send_notification("Đã kết nối với Chrome thành công (sử dụng ChromeDriver local)", "success")
+                    return driver
+                else:
+                    error_message = f"Không tìm thấy ChromeDriver tại {chromedriver_path}"
+                    send_notification(error_message, "error")
+                    return None
+            except Exception as backup_e:
+                error_message = f"Lỗi khi kết nối với Chrome: {str(e)}\nLỗi phương án dự phòng: {str(backup_e)}"
+                send_notification(error_message, "error")
+                return None
 
     except Exception as e:
         error_message = f"Lỗi khi khởi tạo Chrome: {str(e)}"
@@ -245,7 +266,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
 
         # Hover vào menu Tra cứu
         actions.move_to_element(tra_cuu_link).perform()
-        time.sleep(1)  # Đợi animation hover
+        time.sleep(0.5)  # Đợi animation hover
         send_notification("Đã hover vào 'Tra cứu'")
 
         # Click vào menu Tra cứu
@@ -256,7 +277,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         menu_treeview = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "ul.nav-treeview")))
         driver.execute_script("arguments[0].style.display = 'block'; arguments[0].classList.add('show');", menu_treeview)
         send_notification("Đã hiển thị menu con")
-        time.sleep(1)  # Đợi animation menu
+        time.sleep(0.5)  # Đợi animation menu
 
         # Tìm link biên lai
         bien_lai_link = wait.until(EC.element_to_be_clickable(
@@ -266,7 +287,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
 
         # Hover và click vào link biên lai
         actions.move_to_element(bien_lai_link).perform()
-        time.sleep(1)  # Đợi animation hover
+        time.sleep(0.5)  # Đợi animation hover
         send_notification("Đã hover vào link biên lai")
 
         actions.click().perform()
@@ -275,7 +296,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         # Nếu có số tờ khai, thực hiện tìm kiếm
         if so_tk:
             try:
-                time.sleep(3)  # Đợi trang load xong
+                time.sleep(2)  # Đợi trang load xong
                 so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
                 so_tk_input.clear()
                 so_tk_input.send_keys(so_tk)
@@ -288,7 +309,7 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
                 actions.click().perform()
                 send_notification("Đã nhấp nút tìm kiếm")
 
-                time.sleep(3)  # Đợi kết quả tìm kiếm
+                time.sleep(2)  # Đợi kết quả tìm kiếm
             except Exception as e:
                 send_notification(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}", "error")
                 raise
@@ -334,9 +355,8 @@ def get_file_info(driver, link_element):
         row = link_element.find_element(By.XPATH, "./ancestor::tr")
         columns = row.find_elements(By.TAG_NAME, "td")
         so_tk = columns[4].text.strip()
-        ngay = columns[5].text.strip()
-        ngay_formatted = ngay.replace('/', '')
-        filename = f"{so_tk}.pdf"
+        invoice_no = columns[8].text.strip()
+        filename = f"{so_tk}_{invoice_no}.pdf"
         filename = "".join(c for c in filename if c.isalnum() or c in ['_', '-', '.'])
         return filename
     except Exception as e:
@@ -358,7 +378,6 @@ def download_pdf(driver, link_element):
         custom_no = columns[4].text.strip()
         ngay = columns[5].text.strip()
         seriesNo = columns[7].text.strip()
-        print(f"SeriesNo: {seriesNo}")
         invoice_no = columns[8].text.strip()
 
         # Tạo dictionary chứa thông tin hóa đơn
@@ -379,7 +398,7 @@ def download_pdf(driver, link_element):
         filename = get_file_info(driver, link_element)
 
         # Tạo cấu trúc thư mục
-        base_dir = "downloaded_pdfs"
+        base_dir = get_download_directory()
         date_dir = os.path.join(base_dir, ngay_formatted)
         so_tk_dir = os.path.join(date_dir, custom_no)
 

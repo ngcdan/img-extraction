@@ -1,4 +1,6 @@
 import os
+import sys
+import platform
 import json
 import re
 import pyodbc
@@ -6,7 +8,7 @@ import io
 from datetime import datetime
 from openpyxl import load_workbook
 from pdfminer.high_level import extract_text
-from utils import send_notification
+from utils import send_notification, get_download_directory
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -173,11 +175,6 @@ def split_sections(text):
             'table': lines[stt_index:total_index],
             'footer': lines[total_index:]
         }
-
-        # In ra console dạng JSON
-        print("\n=== SECTIONS JSON ===")
-        print(json.dumps(sections, indent=2, ensure_ascii=False))
-
         return sections
 
     except Exception as e:
@@ -205,12 +202,9 @@ def process_file_content(file):
 
             text = extract_text(file_bytes)
             sections = split_sections(text)
-            print(f"Đang xử lý file: {file.filename}")
             if sections:
                 extracted_info = extract_header_info(sections['header'])
                 items = extract_items(sections['table'])
-                print(json.dumps(items, indent=2, ensure_ascii=False))
-
                 extracted_info['line_items'] = items
 
                 customs_number = extracted_info['customs_number'];
@@ -229,19 +223,17 @@ def process_file_content(file):
                             'nguoi_khai': ''
                         })
 
-                print(json.dumps(extracted_info, indent=2, ensure_ascii=False))
                 # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
                 ngay_formatted = extracted_info['date'].replace('/', '')
 
                 # Tạo cấu trúc thư mục
-                base_dir = "downloaded_pdfs"
+                base_dir = get_download_directory()
                 date_dir = os.path.join(base_dir, ngay_formatted)
                 so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
                 # Tạo các thư mục nếu chưa tồn tại
                 for directory in [base_dir, date_dir, so_tk_dir]:
                     if not os.path.exists(directory):
                         os.makedirs(directory)
-                        print(f"Đã tạo thư mục: {directory}")
 
                 # Xử lý tên file và đường dẫn
                 full_path = os.path.join(so_tk_dir, file.filename)
@@ -256,8 +248,6 @@ def process_file_content(file):
                 # Lưu file
                 with open(full_path, 'wb') as f:
                     f.write(file_content)
-
-                print(f"Đã lưu file: {full_path}")
 
                 # Thêm dữ liệu vào Google Sheet
                 google_sheet_success = append_to_google_sheet(extracted_info)
@@ -278,26 +268,21 @@ def process_file_content(file):
             'error': f'Lỗi khi xử lý file: {str(e)}'
         }
 
-# Hàm tạo kết nối SQL Server và thực hiện truy vấn
 def query_customs_info(customs_number):
-    """Tạo kết nối SQL Server và truy vấn thông tin dựa trên số tờ khai"""
+    """Tạo kết nối SQL Server và truy vấn thông tin"""
     try:
-        # Chuỗi kết nối SQL Server từ biến môi trường
         conn_str = (
-            f"DRIVER={{{os.getenv('DB_DRIVER')}}};"
+            "DRIVER={ODBC Driver 17 for SQL Server};"
             f"SERVER={os.getenv('DB_SERVER')};"
             f"DATABASE={os.getenv('DB_NAME')};"
             f"UID={os.getenv('DB_USER')};"
             f"PWD={os.getenv('DB_PASSWORD')};"
-            f"Encrypt={os.getenv('DB_ENCRYPT')};"
-            f"TrustServerCertificate={os.getenv('DB_TRUST_SERVER_CERTIFICATE')};"
+            f"Encrypt={os.getenv('DB_ENCRYPT', 'yes')};"
+            f"TrustServerCertificate={os.getenv('DB_TRUST_SERVER_CERTIFICATE', 'yes')};"
         )
-
-        # Tạo kết nối
         conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
 
-        # Truy vấn SQL với số tờ khai
         query = """
             SELECT
                 td.TransID, td.HWBNO, cs.TKSo, ui.FullName as nguoi_khai
@@ -307,25 +292,19 @@ def query_customs_info(customs_number):
             WHERE cs.TKSo = ?
         """
 
-        # Thực hiện truy vấn với tham số
         cursor.execute(query, customs_number)
         result = cursor.fetchall()
-
-        # Đóng kết nối
         cursor.close()
         conn.close()
 
         if result:
-            print("\nKết quả truy vấn từ cơ sở dữ liệu:")
-            for row in result:
-                print(f"TransID: {row.TransID}, HWBNO: {row.HWBNO}, TKSo: {row.TKSo}, Người khai: {row.nguoi_khai}")
             return result
-        else:
-            print("Không tìm thấy dữ liệu phù hợp trong cơ sở dữ liệu.")
-            return None
+        return None
 
-    except pyodbc.Error as e:
-        send_notification(f"Lỗi khi kết nối hoặc truy vấn cơ sở dữ liệu: {str(e)}", "error")
+    except Exception as e:
+        error_msg = f"Lỗi database: {str(e)}"
+        print(error_msg)
+        send_notification(error_msg, "error")
         return None
 
 def extract_header_info(lines):
@@ -584,7 +563,6 @@ def main():
         customs_number = result['customs_number'];
         if customs_number:
             query_result = query_customs_info(customs_number)
-            print(f"Query result: {query_result}")
             if query_result and len(query_result) > 0:
                 result.update({
                     'jobId': query_result[0].TransID,
@@ -597,10 +575,14 @@ def main():
                     'hawb': '',
                     'nguoi_khai': ''
                 })
-
-        print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         print("Không thể trích xuất văn bản từ file.")
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
+

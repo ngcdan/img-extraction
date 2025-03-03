@@ -5,6 +5,8 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 import platform
 import requests
 import subprocess
@@ -62,13 +64,32 @@ def initialize_chrome():
         chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
 
         try:
-            driver = webdriver.Chrome(options=chrome_options)
+            # Sử dụng webdriver_manager với cấu hình đơn giản hơn
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
             send_notification("Đã kết nối với Chrome thành công", "success")
             return driver
         except Exception as e:
-            error_message = f"Lỗi khi kết nối với Chrome: {str(e)}"
-            send_notification(error_message, "error")
-            return None
+            # Thử phương án dự phòng với ChromeDriver local
+            try:
+                if platform.system() == 'Windows':
+                    chromedriver_path = "./chromedriver.exe"
+                else:
+                    chromedriver_path = "./chromedriver"
+
+                if os.path.exists(chromedriver_path):
+                    service = Service(executable_path=chromedriver_path)
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                    send_notification("Đã kết nối với Chrome thành công (sử dụng ChromeDriver local)", "success")
+                    return driver
+                else:
+                    error_message = f"Không tìm thấy ChromeDriver tại {chromedriver_path}"
+                    send_notification(error_message, "error")
+                    return None
+            except Exception as backup_e:
+                error_message = f"Lỗi khi kết nối với Chrome: {str(e)}\nLỗi phương án dự phòng: {str(backup_e)}"
+                send_notification(error_message, "error")
+                return None
 
     except Exception as e:
         error_message = f"Lỗi khi khởi tạo Chrome: {str(e)}"

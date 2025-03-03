@@ -280,7 +280,7 @@ def query_customs_info(customs_number):
             f"Encrypt={os.getenv('DB_ENCRYPT', 'yes')};"
             f"TrustServerCertificate={os.getenv('DB_TRUST_SERVER_CERTIFICATE', 'yes')};"
         )
-        conn = pyodbc.connect(conn_str, timeout=60)
+        conn = pyodbc.connect(conn_str)
         cursor = conn.cursor()
 
         query = """

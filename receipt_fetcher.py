@@ -12,6 +12,7 @@ import time
 import os
 import base64
 from utils import send_notification
+from extract_info import update_last_row_sheet
 
 def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
@@ -354,8 +355,22 @@ def download_pdf(driver, link_element):
         columns = row.find_elements(By.TAG_NAME, "td")
 
         # Lấy giá trị từ cột thứ 5 và 6 (index 4 và 5)
-        so_tk = columns[4].text.strip()
+        custom_no = columns[4].text.strip()
         ngay = columns[5].text.strip()
+        seriesNo = columns[7].text.strip()
+        print(f"SeriesNo: {seriesNo}")
+        invoice_no = columns[8].text.strip()
+
+        # Tạo dictionary chứa thông tin hóa đơn
+        invoice_info = {
+            'invoice_no': invoice_no,
+            'seriesNo': seriesNo,
+            'ngay': ngay
+        }
+
+        # Cập nhật thông tin vào dòng cuối của Google Sheet
+        update_last_row_sheet(invoice_info)
+
 
         # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
         ngay_formatted = ngay.replace('/', '')
@@ -366,7 +381,7 @@ def download_pdf(driver, link_element):
         # Tạo cấu trúc thư mục
         base_dir = "downloaded_pdfs"
         date_dir = os.path.join(base_dir, ngay_formatted)
-        so_tk_dir = os.path.join(date_dir, so_tk)
+        so_tk_dir = os.path.join(date_dir, custom_no)
 
         # Tạo các thư mục nếu chưa tồn tại
         for directory in [base_dir, date_dir, so_tk_dir]:

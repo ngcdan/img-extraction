@@ -6,11 +6,8 @@ import os
 import io
 from datetime import datetime
 from utils import init_socketio, send_notification
-from receipt_fetcher import (
-    initialize_chrome, process_download,
-    navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
-)
-from extract_info import process_file_content, append_to_google_sheet
+from receipt_fetcher import ( initialize_chrome, process_download)
+from extract_info import process_file_content
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -123,6 +120,7 @@ def upload_file():
 
         file = request.files['file']
         result = process_file_content(file)
+
         return jsonify(result)
 
     except Exception as e:

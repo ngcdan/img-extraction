@@ -59,7 +59,7 @@ def append_to_google_sheet(extracted_info):
             return False
 
         # Validate input data
-        line_items = extracted_info.get('line_items', {}).get('items', [])
+        line_items = extracted_info.get('line_items', []);
         if not line_items:
             send_notification("Không có thông tin container để thêm vào Sheet", "warning")
             return False
@@ -70,7 +70,7 @@ def append_to_google_sheet(extracted_info):
                 spreadsheetId=SPREADSHEET_ID,
                 range=RANGE_NAME
             ).execute()
-            current_row = len(result.get('values', [])) + 1
+            current_row = len(result.get('values', []))
         except HttpError as e:
             send_notification(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}", "error")
             return False
@@ -91,16 +91,20 @@ def append_to_google_sheet(extracted_info):
                 extracted_info.get('so_ct', ''),  # Số chứng từ
                 fixed_data['service_code'],
                 fixed_data['vendor'],
-                extracted_info.get('jobID', ''),
+                extracted_info.get('jobId', ''),
                 extracted_info.get('hawb', ''),
+                extracted_info.get('customs_number', ''),
                 fixed_data['charge_code'],
                 fixed_data['description'],
                 line.get('quantity', ''),
                 fixed_data['unit'],
                 line.get('unit_price', ''),
                 '',  # Cột 12 để trống
-                line.get('total', ''),
-                '', '', '', '', '', '', '',  # Cột 14-20 để trống
+                line.get('amount', ''),
+                '', '', '', '',
+                extracted_info.get('tax_number'),
+                extracted_info.get('partner_invoice_name'),
+                '',  # Cột 20 để trống (Notes)
                 line.get('container_no', ''),
                 line.get('label', '')
             ]
@@ -214,14 +218,14 @@ def process_file_content(file):
                     query_result = query_customs_info(customs_number)
                     if query_result and len(query_result) > 0:
                         extracted_info.update({
-                            'TransID': query_result[0].TransID,
-                            'HWBNO': query_result[0].HWBNO,
+                            'jobId': query_result[0].TransID,
+                            'hawb': query_result[0].HWBNO,
                             'nguoi_khai': query_result[0].nguoi_khai
                         })
                     else:
                         extracted_info.update({
-                            'TransID': '',
-                            'HWBNO': '',
+                            'jobId': '',
+                            'hawb': '',
                             'nguoi_khai': ''
                         })
 
@@ -331,7 +335,8 @@ def extract_header_info(lines):
             'so_ct': None,
             'date': None,
             'tax_number': None,
-            'customs_number': None
+            'customs_number': None,
+            'partner_invoice_name': None
         }
 
         # Tìm vị trí của "Mẫu số:"
@@ -349,6 +354,13 @@ def extract_header_info(lines):
             # Lấy ngày (line bắt đầu bằng "Ngày:")
             if mau_so_index + 2 < len(lines) and lines[mau_so_index + 2].startswith("Ngày:"):
                 result['date'] = lines[mau_so_index + 2].replace("Ngày:", "").strip()
+
+        # Tìm tên đối tác (dòng sau "Kính gửi:")
+        for i, line in enumerate(lines):
+            if line == "Kính gửi:":
+                if i + 1 < len(lines):
+                    result['partner_invoice_name'] = lines[i + 1].strip()
+                break
 
         # Tìm mã số thuế
         for i, line in enumerate(lines):
@@ -400,57 +412,87 @@ def extract_items(table_data):
                 numbers_between.append(int(table_data[i]))
         num_rows = max(numbers_between) if numbers_between else 0
 
-        # 2. Tìm labels (descriptions)
-        start_label_index = table_data.index("(7) = (5)*(6)") + 1
-        labels = []
-        current_index = start_label_index
-        while current_index < len(table_data) and not table_data[current_index].startswith(('SEGU', 'UETU', 'TEMU', 'NSSU')):
-            if table_data[current_index] not in ['Đồng/Container']:
-                labels.append(table_data[current_index])
-            current_index += 1
+        if num_rows == 0:
+            return []
 
-        # 3. Tìm container numbers
-        container_numbers = []
-        while current_index < len(table_data) and table_data[current_index].startswith(('SEGU', 'UETU', 'TEMU', 'NSSU')):
-            container_numbers.append(table_data[current_index])
-            current_index += 1
+        # 2. Tìm vị trí bắt đầu của dữ liệu
+        start_data_index = table_data.index("(7) = (5)*(6)") + 1
 
-        # 4. Skip qua các dòng "Đồng/Container"
-        while current_index < len(table_data) and table_data[current_index] == 'Đồng/Container':
-            current_index += 1
-
-        # 5. Lấy unit prices
-        unit_prices = []
-        for _ in range(len(container_numbers)):
-            if current_index < len(table_data):
-                unit_prices.append(table_data[current_index])
-                current_index += 1
-
-        # 6. Lấy quantities
-        quantities = []
-        for _ in range(len(container_numbers)):
-            if current_index < len(table_data):
-                quantities.append(table_data[current_index])
-                current_index += 1
-
-        # 7. Lấy amounts
+        # 3. Loop ngược từ cuối lên để lấy dữ liệu
+        current_index = len(table_data) - 1
         amounts = []
-        for _ in range(len(container_numbers)):
-            if current_index < len(table_data):
-                amounts.append(table_data[current_index])
-                current_index += 1
+        quantities = []
+        unit_prices = []
+        units = []
+        container_numbers = []
+        labels = []
+
+        # Lấy amounts (số cuối cùng cho mỗi dòng)
+        for _ in range(num_rows):
+            while current_index >= 0 and not table_data[current_index].replace('.', '').isdigit():
+                current_index -= 1
+            if current_index >= 0:
+                amounts.insert(0, table_data[current_index])
+                current_index -= 1
+
+        # Lấy quantities
+        for _ in range(num_rows):
+            while current_index >= 0 and not table_data[current_index].isdigit():
+                current_index -= 1
+            if current_index >= 0:
+                quantities.insert(0, table_data[current_index])
+                current_index -= 1
+
+        # Lấy unit prices
+        for _ in range(num_rows):
+            while current_index >= 0 and not table_data[current_index].replace('.', '').isdigit():
+                current_index -= 1
+            if current_index >= 0:
+                unit_prices.insert(0, table_data[current_index])
+                current_index -= 1
+
+        # Lấy units
+        for _ in range(num_rows):
+            while current_index >= 0 and table_data[current_index] != "Đồng/Container":
+                current_index -= 1
+            if current_index >= 0:
+                units.insert(0, table_data[current_index])
+                current_index -= 1
+
+        # Lấy container numbers - không check startsWith, chỉ lấy theo vị trí
+        for _ in range(num_rows):
+            # Skip qua các phần tử không phải container number
+            while current_index >= 0 and table_data[current_index] in ['Đồng/Container']:
+                current_index -= 1
+            if current_index >= 0:
+                container_numbers.insert(0, table_data[current_index])
+                current_index -= 1
+
+        # Lấy labels
+        for _ in range(num_rows):
+            label = []
+            while current_index >= start_data_index:
+                if table_data[current_index] not in ['Đồng/Container']:
+                    label.insert(0, table_data[current_index])
+                current_index -= 1
+                # Dừng khi gặp container number tiếp theo hoặc đến start_data_index
+                if current_index < start_data_index:
+                    break
+            labels.insert(0, ' '.join(label) if label else '')
 
         # Tạo items
-        for i in range(len(container_numbers)):
-            item = {
-                'container_no': container_numbers[i],
-                'description': labels[i] if i < len(labels) else 'Container',
-                'unit': 'Đồng/Container',
-                'price': int(unit_prices[i].replace('.', '')),
-                'quantity': int(quantities[i]),
-                'amount': int(amounts[i].replace('.', ''))
-            }
-            items.append(item)
+        for i in range(num_rows):
+            if (i < len(container_numbers) and i < len(unit_prices) and
+                i < len(quantities) and i < len(amounts)):
+                item = {
+                    'container_no': container_numbers[i],
+                    'label': labels[i] if i < len(labels) else '',
+                    'unit': units[i] if i < len(units) else 'Đồng/Container',
+                    'price': int(unit_prices[i].replace('.', '')),
+                    'quantity': int(quantities[i]),
+                    'amount': int(amounts[i].replace('.', ''))
+                }
+                items.append(item)
 
         return items
 
@@ -459,13 +501,79 @@ def extract_items(table_data):
         print(f"Chi tiết bảng dữ liệu: {table_data}")
         return []
 
+def update_last_row_sheet(invoice_info):
+    """Cập nhật thông tin invoice cho dòng cuối cùng trong Google Sheet"""
+    try:
+        # Cấu hình credentials
+        SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+        SERVICE_ACCOUNT_FILE = './service-account-key.json'
+        SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
+        RANGE_NAME = 'main!A:V'
+
+        if not os.path.exists(SERVICE_ACCOUNT_FILE):
+            send_notification("File service account không tồn tại", "error")
+            return False
+
+        # Khởi tạo credentials và service
+        try:
+            creds = service_account.Credentials.from_service_account_file(
+                SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+            service = build('sheets', 'v4', credentials=creds)
+            sheet = service.spreadsheets()
+        except Exception as e:
+            send_notification(f"Lỗi khởi tạo service: {str(e)}", "error")
+            return False
+
+        # Lấy số dòng hiện tại
+        try:
+            result = sheet.values().get(
+                spreadsheetId=SPREADSHEET_ID,
+                range=RANGE_NAME
+            ).execute()
+            values = result.get('values', [])
+            last_row = len(values)
+
+            if last_row == 0:
+                send_notification("Không có dữ liệu trong sheet", "error")
+                return False
+
+            # Cập nhật các ô cần thiết ở dòng cuối
+            update_range = f'main!P{last_row}:R{last_row}'  # Cột O-Q (15-17)
+            update_values = [[
+                invoice_info.get('invoice_no', ''),
+                invoice_info.get('seriesNo', ''),
+                invoice_info.get('ngay', '')
+            ]]
+
+            body = {
+                'values': update_values
+            }
+
+            sheet.values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=update_range,
+                valueInputOption='USER_ENTERED',
+                body=body
+            ).execute()
+
+            send_notification("Đã cập nhật thông tin invoice thành công", "success")
+            return True
+
+        except HttpError as e:
+            send_notification(f"Lỗi khi cập nhật Google Sheet: {str(e)}", "error")
+            return False
+
+    except Exception as e:
+        send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
+        return False
+
 def main():
 
     # Giả lập việc trích xuất từ PDF
 
-    # pdf_path = "data/BLHPH005202.pdf"
+    pdf_path = "data/BLHPH005202.pdf"
     # pdf_path = "data/BLHPH005504.pdf"
-    pdf_path = "data/4.pdf"
+    # pdf_path = "data/4.pdf"
 
     sections = extract_text_from_pdf(pdf_path)
     if sections:

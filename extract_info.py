@@ -15,36 +15,6 @@ from googleapiclient.errors import HttpError
 from time import sleep
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-def get_bundle_dir():
-    """Lấy đường dẫn thư mục bundle"""
-    if getattr(sys, 'frozen', False):
-        return sys._MEIPASS
-    return os.path.dirname(os.path.abspath(__file__))
-
-def get_odbc_driver():
-    """Lấy driver ODBC từ bundle hoặc hệ thống"""
-    try:
-        # Thử tìm driver trong bundle
-        bundle_driver_path = os.path.join(get_bundle_dir(), 'drivers')
-        if os.path.exists(bundle_driver_path):
-            if platform.system() == 'Windows':
-                return os.path.join(bundle_driver_path, 'msodbcsql17.dll')
-            else:
-                return os.path.join(bundle_driver_path, 'libmsodbcsql.17.dylib')
-
-        # Fallback to system drivers
-        drivers = pyodbc.drivers()
-        if drivers:
-            for driver in ['ODBC Driver 17 for SQL Server', 'ODBC Driver 18 for SQL Server']:
-                if driver in drivers:
-                    return driver
-
-        raise Exception("Không tìm thấy ODBC driver phù hợp")
-
-    except Exception as e:
-        print(f"Lỗi khi tìm ODBC driver: {str(e)}")
-        return None
-
 def append_to_google_sheet(extracted_info):
     """Thêm thông tin vào Google Sheet với retry logic"""
 
@@ -205,11 +175,6 @@ def split_sections(text):
             'table': lines[stt_index:total_index],
             'footer': lines[total_index:]
         }
-
-        # In ra console dạng JSON
-        print("\n=== SECTIONS JSON ===")
-        print(json.dumps(sections, indent=2, ensure_ascii=False))
-
         return sections
 
     except Exception as e:
@@ -237,12 +202,9 @@ def process_file_content(file):
 
             text = extract_text(file_bytes)
             sections = split_sections(text)
-            print(f"Đang xử lý file: {file.filename}")
             if sections:
                 extracted_info = extract_header_info(sections['header'])
                 items = extract_items(sections['table'])
-                print(json.dumps(items, indent=2, ensure_ascii=False))
-
                 extracted_info['line_items'] = items
 
                 customs_number = extracted_info['customs_number'];
@@ -261,7 +223,6 @@ def process_file_content(file):
                             'nguoi_khai': ''
                         })
 
-                print(json.dumps(extracted_info, indent=2, ensure_ascii=False))
                 # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
                 ngay_formatted = extracted_info['date'].replace('/', '')
 
@@ -273,7 +234,6 @@ def process_file_content(file):
                 for directory in [base_dir, date_dir, so_tk_dir]:
                     if not os.path.exists(directory):
                         os.makedirs(directory)
-                        print(f"Đã tạo thư mục: {directory}")
 
                 # Xử lý tên file và đường dẫn
                 full_path = os.path.join(so_tk_dir, file.filename)
@@ -288,8 +248,6 @@ def process_file_content(file):
                 # Lưu file
                 with open(full_path, 'wb') as f:
                     f.write(file_content)
-
-                print(f"Đã lưu file: {full_path}")
 
                 # Thêm dữ liệu vào Google Sheet
                 google_sheet_success = append_to_google_sheet(extracted_info)
@@ -313,12 +271,8 @@ def process_file_content(file):
 def query_customs_info(customs_number):
     """Tạo kết nối SQL Server và truy vấn thông tin"""
     try:
-        driver = get_odbc_driver()
-        if not driver:
-            raise Exception("Không thể tìm thấy ODBC driver")
-
         conn_str = (
-            f"DRIVER={{{driver}}};"
+            "DRIVER={ODBC Driver 17 for SQL Server};"
             f"SERVER={os.getenv('DB_SERVER')};"
             f"DATABASE={os.getenv('DB_NAME')};"
             f"UID={os.getenv('DB_USER')};"
@@ -326,8 +280,7 @@ def query_customs_info(customs_number):
             f"Encrypt={os.getenv('DB_ENCRYPT', 'yes')};"
             f"TrustServerCertificate={os.getenv('DB_TRUST_SERVER_CERTIFICATE', 'yes')};"
         )
-
-        conn = pyodbc.connect(conn_str)
+        conn = pyodbc.connect(conn_str, timeout=60)
         cursor = conn.cursor()
 
         query = """
@@ -345,13 +298,7 @@ def query_customs_info(customs_number):
         conn.close()
 
         if result:
-            print("\nKết quả truy vấn từ database:")
-            for row in result:
-                print(f"TransID: {row.TransID}, HWBNO: {row.HWBNO}, "
-                      f"TKSo: {row.TKSo}, Người khai: {row.nguoi_khai}")
             return result
-
-        print("Không tìm thấy dữ liệu phù hợp.")
         return None
 
     except Exception as e:
@@ -616,7 +563,6 @@ def main():
         customs_number = result['customs_number'];
         if customs_number:
             query_result = query_customs_info(customs_number)
-            print(f"Query result: {query_result}")
             if query_result and len(query_result) > 0:
                 result.update({
                     'jobId': query_result[0].TransID,
@@ -629,8 +575,6 @@ def main():
                     'hawb': '',
                     'nguoi_khai': ''
                 })
-
-        print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         print("Không thể trích xuất văn bản từ file.")
 

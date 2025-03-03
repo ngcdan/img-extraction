@@ -1,7 +1,0 @@
-flask
-flask-cors
-flask-socketio
-selenium
-python-dotenv
-pyinstaller
-rapidfuzz>=2.0.0

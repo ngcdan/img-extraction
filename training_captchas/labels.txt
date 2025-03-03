@@ -80,3 +80,4 @@ captcha_75.png	AQMVR
 captcha_76.png	QEYQY
 captcha_77.png	KDYSF
 captcha_78.png	HMADTY
+captcha_79.png	WQGQK

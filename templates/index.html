@@ -266,7 +266,7 @@ function uploadFile() {
 
       // Hiển thị JobId nếu có
       if (data.data.jobID) {
-        jobIdDisplay.textContent = data.data.hawb;
+        jobIdDisplay.textContent = data.data.jobId;
         jobIdDisplay.classList.add('filled');
         setTimeout(() => jobIdDisplay.classList.remove('filled'), 2000);
       } else {

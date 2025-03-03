@@ -10,7 +10,7 @@ from receipt_fetcher import (
     initialize_chrome, process_download,
     navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
 )
-from extract_info import process_file_content, query_customs_info, append_to_google_sheet
+from extract_info import process_file_content, append_to_google_sheet
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})

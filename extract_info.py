@@ -124,287 +124,10 @@ def extract_text_from_pdf(pdf_path):
     """Trích xuất văn bản từ file PDF."""
     try:
         text = extract_text(pdf_path)
-        return text
+        sections = split_sections(text)
+        return sections
     except Exception as e:
         print(f"Lỗi khi trích xuất văn bản: {e}")
-        return None
-
-def extract_so_chung_tu_regex(text):
-    """Sử dụng regex để tìm số sau chữ 'Số:'"""
-    # Pattern tìm dòng bắt đầu bằng 'Số:' và lấy chuỗi số
-    pattern = r'Số:\s*(\d+)'
-    match = re.search(pattern, text)
-    if match:
-        return match.group(1)
-    return None
-
-def extract_date_by_lines(text):
-    """Trích xuất ngày từ văn bản"""
-    lines = text.split('\n')
-    found_so = False
-
-    for line in lines:
-        line = line.strip()
-        # Tìm dòng bắt đầu bằng "Số:"
-        if line.startswith("Số:"):
-            found_so = True
-            continue
-
-        # Nếu đã tìm thấy "Số:", kiểm tra dòng tiếp theo bắt đầu bằng "Ngày:"
-        if found_so and line.startswith("Ngày:"):
-            # Tách và lấy phần ngày
-            date = line.split(":")[-1].strip()
-            return date
-
-    return None
-
-def extract_so_ct_by_lines(text):
-    """Tìm số bằng cách xử lý từng dòng"""
-    lines = text.split('\n')
-    found_mau_so = False
-
-    for line in lines:
-        line = line.strip()
-        # Tìm dòng bắt đầu bằng "Mẫu số:"
-        if line.startswith("Mẫu số:"):
-            found_mau_so = True
-            continue
-
-        # Nếu đã tìm thấy "Mẫu số:", kiểm tra dòng tiếp theo
-        if found_mau_so and line.startswith("Số:"):
-            # Tách và lấy phần số
-            number = line.split(":")[-1].strip()
-            # Chỉ lấy các ký tự số
-            number = ''.join(filter(str.isdigit, number))
-            return number
-
-    return None
-
-def extract_tax_number(text):
-    """Trích xuất mã số thuế từ văn bản"""
-    lines = text.split('\n')
-    found_tax_label = False
-    found_address_label = False
-    next_line_data = False
-
-    for i, line in enumerate(lines):
-        line = line.strip()
-
-        # Tìm dòng "Mã số thuế:"
-        if line == "Mã số thuế:":
-            found_tax_label = True
-            continue
-
-        # Tìm dòng "Địa chỉ:"
-        if line == "Địa chỉ:":
-            found_address_label = True
-            continue
-
-        # Nếu đã tìm thấy cả 2 label và gặp dòng trống
-        if found_tax_label and found_address_label and line == "":
-            next_line_data = True
-            continue
-
-        # Lấy dữ liệu ở dòng tiếp theo sau dòng trống
-        if next_line_data and line:
-            # Kiểm tra xem dòng có phải là số không
-            if line.isdigit():
-                return line
-            break
-
-    return None
-
-def extract_customs_declaration(text):
-    """Trích xuất số tờ khai hải quan từ văn bản"""
-    lines = text.split('\n')
-    found_customs_label = False
-    found_fee_label = False
-    next_line_data = False
-
-    for i, line in enumerate(lines):
-        line = line.strip()
-
-        # Tìm dòng "Số tờ khai Hải quan:"
-        if line == "Số tờ khai Hải quan:":
-            found_customs_label = True
-            continue
-
-        # Tìm dòng "Tờ khai nộp phí:"
-        if line == "Tờ khai nộp phí:":
-            found_fee_label = True
-            continue
-
-        # Nếu đã tìm thấy cả 2 label và gặp dòng trống
-        if found_customs_label and found_fee_label and line == "":
-            next_line_data = True
-            continue
-
-        # Lấy dữ liệu ở dòng tiếp theo sau dòng trống
-        if next_line_data and line:
-            # Kiểm tra xem dòng có phải là số không
-            if line.isdigit():
-                return line
-            break
-
-    return None
-
-def extract_total_amount(text):
-    """Trích xuất tổng số tiền từ văn bản"""
-    lines = text.split('\n')
-    for i, line in enumerate(lines):
-        if "Tổng tiền phí phải nộp:" in line:
-            # Lấy số tiền ở dòng tiếp theo
-            if i + 1 < len(lines):
-                amount_str = lines[i + 1].strip()
-                # Chuyển đổi chuỗi tiền thành số
-                return convert_price_to_number(amount_str)
-    return 0
-
-# Thêm hàm kiểm tra định dạng số tờ khai
-def validate_customs_number(number):
-    """Kiểm tra định dạng số tờ khai hải quan"""
-    if not number:
-        return False
-
-    # Kiểm tra độ dài (thường là 12 số)
-    if len(number) != 12:
-        return False
-
-    # Kiểm tra chỉ chứa số
-    if not number.isdigit():
-        return False
-
-    return True
-
-def count_lines(text):
-    """Đếm số lines dựa trên format chuẩn"""
-    lines = text.split('\n')
-    try:
-        # Tìm vị trí của "STT" và "Biểu cước"
-        stt_index = next(i for i, line in enumerate(lines) if line.strip() == "STT")
-        bieu_cuoc_index = next(i for i, line in enumerate(lines) if line.strip() == "Biểu cước")
-
-        # Đếm số số thứ tự giữa "STT" và "Biểu cước"
-        numbers = []
-        for line in lines[stt_index:bieu_cuoc_index]:
-            if line.strip().isdigit():
-                numbers.append(int(line.strip()))
-
-        return len(numbers)
-    except Exception as e:
-        print(f"Lỗi khi đếm số lines: {str(e)}")
-        return 0
-
-def extract_items(text):
-    """Trích xuất thông tin container từ văn bản"""
-    try:
-        lines = text.split('\n')
-        num_lines = count_lines(text)
-        if num_lines == 0:
-            return None
-
-        # Tìm vị trí bắt đầu của thông tin
-        start_index = -1
-        for i, line in enumerate(lines):
-            if "(7) = (5)*(6)" in line:
-                start_index = i + 1
-                break
-
-        if start_index == -1:
-            return None
-
-        # Khởi tạo list để lưu thông tin các lines
-        container_items = []
-        current_index = start_index
-
-        # Đọc từng block thông tin
-        while current_index < len(lines):
-            try:
-                item = {}
-
-                # Đọc label (Container...)
-                while current_index < len(lines):
-                    line = lines[current_index].strip()
-                    if line and "Container" in line:
-                        item['label'] = line
-                        current_index += 1
-                        break
-                    current_index += 1
-
-                # Nếu không tìm thấy label, thoát khỏi vòng lặp
-                if 'label' not in item:
-                    break
-
-                # Đọc container number
-                while current_index < len(lines):
-                    line = lines[current_index].strip()
-                    if line:
-                        item['container_no'] = line
-                        current_index += 1
-                        break
-                    current_index += 1
-
-                # Bỏ qua "Đồng/Container"
-                while current_index < len(lines):
-                    line = lines[current_index].strip()
-                    if line == "Đồng/Container":
-                        current_index += 1
-                        break
-                    current_index += 1
-
-                # Đọc unit price
-                while current_index < len(lines):
-                    line = lines[current_index].strip()
-                    if line and any(c.isdigit() for c in line):
-                        item['unit_price'] = convert_price_to_number(line)
-                        current_index += 1
-                        break
-                    current_index += 1
-
-                # Đọc quantity
-                while current_index < len(lines):
-                    line = lines[current_index].strip()
-                    if line and line.isdigit():
-                        item['quantity'] = int(line)
-                        current_index += 1
-                        break
-                    current_index += 1
-
-                # Đọc total
-                while current_index < len(lines):
-                    line = lines[current_index].strip()
-                    if line and any(c.isdigit() for c in line):
-                        item['total'] = convert_price_to_number(line)
-                        current_index += 1
-                        break
-                    current_index += 1
-
-                # Kiểm tra xem đã có đủ thông tin chưa
-                required_fields = ['label', 'container_no', 'unit_price', 'quantity', 'total']
-                if all(field in item for field in required_fields):
-                    container_items.append(item)
-
-                # Kiểm tra nếu đã đủ số lines
-                if len(container_items) >= num_lines:
-                    break
-
-            except Exception as e:
-                print(f"Lỗi khi xử lý item: {str(e)}")
-                continue
-
-        # Kiểm tra kết quả
-        if not container_items:
-            print("Không tìm thấy thông tin container hợp lệ")
-            return None
-
-        return {
-            'num_lines': len(container_items),
-            'items': container_items,
-            'total_amount': sum(item['total'] for item in container_items)
-        }
-
-    except Exception as e:
-        print(f"Lỗi khi trích xuất thông tin container: {str(e)}")
         return None
 
 def convert_price_to_number(price_str):
@@ -414,6 +137,48 @@ def convert_price_to_number(price_str):
         return int(price_str.replace('.', '').replace(',', ''))
     except:
         return 0
+
+def split_sections(text):
+    """Làm sạch và phân vùng văn bản thành header, table và footer dạng lists"""
+    try:
+        # Xử lý và làm sạch text
+        lines = []
+        for line in text.split('\n'):
+            line = line.strip()
+            if line:  # Chỉ giữ lại các dòng không trống
+                lines.append(line)
+
+        # Tìm vị trí của các marker
+        stt_index = -1
+        total_index = -1
+
+        for i, line in enumerate(lines):
+            if line == "STT":
+                stt_index = i
+            elif line.startswith("Tổng cộng:"):
+                total_index = i
+                break
+
+        if stt_index == -1 or total_index == -1:
+            print("Không tìm thấy các marker để phân vùng")
+            return None
+
+        # Phân vùng dữ liệu thành lists
+        sections = {
+            'header': lines[:stt_index],
+            'table': lines[stt_index:total_index],
+            'footer': lines[total_index:]
+        }
+
+        # In ra console dạng JSON
+        print("\n=== SECTIONS JSON ===")
+        print(json.dumps(sections, indent=2, ensure_ascii=False))
+
+        return sections
+
+    except Exception as e:
+        print(f"Lỗi khi xử lý và phân vùng dữ liệu: {str(e)}")
+        return None
 
 def process_file_content(file):
     """
@@ -429,85 +194,79 @@ def process_file_content(file):
         if not file or not file.filename:
             raise ValueError('File không hợp lệ')
 
-        print(f"Đang xử lý file: {file.filename}")
-
         # Đọc và xử lý nội dung file
         if file.filename.endswith('.pdf'):
             file_bytes = io.BytesIO(file.read())
-            text = extract_text_from_pdf(file_bytes)
             file_content = file_bytes.getvalue()
-        else:
-            text = file.read().decode('utf-8')
-            file_content = text.encode('utf-8')
 
-        # Trích xuất thông tin cơ bản
-        extracted_info = {
-            'so_ct': extract_so_ct_by_lines(text[:]),
-            'tax_number': extract_tax_number(text[:]),
-            'date': extract_date_by_lines(text[:]),
-            'customs_number': extract_customs_declaration(text[:]),
-            'total_amount': extract_total_amount(text[:]),
-            'line_items': extract_items(text[:])
-        }
+            text = extract_text(file_bytes)
+            sections = split_sections(text)
+            print(f"Đang xử lý file: {file.filename}")
+            if sections:
+                extracted_info = extract_header_info(sections['header'])
+                items = extract_items(sections['table'])
+                print(json.dumps(items, indent=2, ensure_ascii=False))
 
-        # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
-        ngay_formatted = extracted_info['date'].replace('/', '')
+                extracted_info['line_items'] = items
 
-        # Tạo cấu trúc thư mục
-        base_dir = "downloaded_pdfs"
-        date_dir = os.path.join(base_dir, ngay_formatted)
-        so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
+                customs_number = extracted_info['customs_number'];
+                if customs_number:
+                    query_result = query_customs_info(customs_number)
+                    if query_result and len(query_result) > 0:
+                        extracted_info.update({
+                            'TransID': query_result[0].TransID,
+                            'HWBNO': query_result[0].HWBNO,
+                            'nguoi_khai': query_result[0].nguoi_khai
+                        })
+                    else:
+                        extracted_info.update({
+                            'TransID': '',
+                            'HWBNO': '',
+                            'nguoi_khai': ''
+                        })
 
-        # Query thông tin customs
-        results = query_customs_info(extracted_info['customs_number'])
+                print(json.dumps(extracted_info, indent=2, ensure_ascii=False))
+                # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
+                ngay_formatted = extracted_info['date'].replace('/', '')
 
-        # Cập nhật thông tin bổ sung
-        if results and len(results) > 0:
-            extracted_info.update({
-                'jobID': results[0].TransID,
-                'hawb': results[0].HWBNO,
-                'nguoiKhai': results[0].nguoi_khai
-            })
-        else:
-            extracted_info.update({
-                'jobID': '',
-                'hawb': '',
-                'nguoiKhai': ''
-            })
+                # Tạo cấu trúc thư mục
+                base_dir = "downloaded_pdfs"
+                date_dir = os.path.join(base_dir, ngay_formatted)
+                so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
+                # Tạo các thư mục nếu chưa tồn tại
+                for directory in [base_dir, date_dir, so_tk_dir]:
+                    if not os.path.exists(directory):
+                        os.makedirs(directory)
+                        print(f"Đã tạo thư mục: {directory}")
 
-        # Tạo các thư mục nếu chưa tồn tại
-        for directory in [base_dir, date_dir, so_tk_dir]:
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-                print(f"Đã tạo thư mục: {directory}")
+                # Xử lý tên file và đường dẫn
+                full_path = os.path.join(so_tk_dir, file.filename)
+                if os.path.exists(full_path):
+                    base_name, ext = os.path.splitext(file.filename)
+                    counter = 1
+                    while os.path.exists(full_path):
+                        new_filename = f"{base_name}_{counter}{ext}"
+                        full_path = os.path.join(so_tk_dir, new_filename)
+                        counter += 1
 
-        # Xử lý tên file và đường dẫn
-        full_path = os.path.join(so_tk_dir, file.filename)
-        if os.path.exists(full_path):
-            base_name, ext = os.path.splitext(file.filename)
-            counter = 1
-            while os.path.exists(full_path):
-                new_filename = f"{base_name}_{counter}{ext}"
-                full_path = os.path.join(so_tk_dir, new_filename)
-                counter += 1
+                # Lưu file
+                with open(full_path, 'wb') as f:
+                    f.write(file_content)
 
-        # Lưu file
-        with open(full_path, 'wb') as f:
-            f.write(file_content)
+                print(f"Đã lưu file: {full_path}")
 
-        print(f"Đã lưu file: {full_path}")
+                # Thêm dữ liệu vào Google Sheet
+                google_sheet_success = append_to_google_sheet(extracted_info)
 
-        # Thêm dữ liệu vào Google Sheet
-        google_sheet_success = append_to_google_sheet(extracted_info)
-
-        return {
-            'success': True,
-            'message': 'Trích xuất và lưu file thành công',
-            'data': extracted_info,
-            'saved_path': full_path,
-            'google_sheet_status': google_sheet_success
-        }
-
+                return {
+                    'success': True,
+                    'message': 'Trích xuất và lưu file thành công',
+                    'data': extracted_info,
+                    'saved_path': full_path,
+                    'google_sheet_status': google_sheet_success
+                }
+            else:
+                print("Không thể trích xuất văn bản từ file.")
     except Exception as e:
         print(f"Lỗi khi xử lý file: {str(e)}")
         return {
@@ -536,11 +295,12 @@ def query_customs_info(customs_number):
 
         # Truy vấn SQL với số tờ khai
         query = """
-        SELECT td.TransID, td.HWBNO, cs.TKSo, ui.FullName as nguoi_khai
-        FROM TransactionDetails td
-        JOIN CustomsDeclaration cs ON cs.MasoTK = td.CustomsID
-        JOIN UserInfos ui ON ui.Username = cs.NguoiKhai
-        WHERE cs.TKSo = ?
+            SELECT
+                td.TransID, td.HWBNO, cs.TKSo, ui.FullName as nguoi_khai
+            FROM TransactionDetails td
+                JOIN CustomsDeclaration cs ON cs.MasoTK = td.CustomsID
+                JOIN UserInfos ui ON ui.Username = cs.NguoiKhai
+            WHERE cs.TKSo = ?
         """
 
         # Thực hiện truy vấn với tham số
@@ -564,31 +324,173 @@ def query_customs_info(customs_number):
         send_notification(f"Lỗi khi kết nối hoặc truy vấn cơ sở dữ liệu: {str(e)}", "error")
         return None
 
+def extract_header_info(lines):
+    """Extract thông tin từ văn bản sử dụng regex và logic phân tích chuỗi"""
+    try:
+        result = {
+            'so_ct': None,
+            'date': None,
+            'tax_number': None,
+            'customs_number': None
+        }
+
+        # Tìm vị trí của "Mẫu số:"
+        mau_so_index = -1
+        for i, line in enumerate(lines):
+            if line.startswith("Mẫu số:"):
+                mau_so_index = i
+                break
+
+        if mau_so_index != -1:
+            # Lấy số chứng từ (line bắt đầu bằng "Số:")
+            if mau_so_index + 1 < len(lines) and lines[mau_so_index + 1].startswith("Số:"):
+                result['so_ct'] = lines[mau_so_index + 1].replace("Số:", "").strip()
+
+            # Lấy ngày (line bắt đầu bằng "Ngày:")
+            if mau_so_index + 2 < len(lines) and lines[mau_so_index + 2].startswith("Ngày:"):
+                result['date'] = lines[mau_so_index + 2].replace("Ngày:", "").strip()
+
+        # Tìm mã số thuế
+        for i, line in enumerate(lines):
+            if line == "Mã số thuế:":
+                # Tìm số thuế trong 3 dòng tiếp theo
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    potential_tax = lines[j].strip()
+                    # Kiểm tra xem có phải là số và không phải là "Địa chỉ:"
+                    if potential_tax.isdigit() and potential_tax != "Địa chỉ:":
+                        result['tax_number'] = potential_tax
+                        break
+                break
+
+        # Tìm số tờ khai hải quan
+        for i, line in enumerate(lines):
+            if line == "Số tờ khai Hải quan:":
+                if i + 2 < len(lines):  # +2 vì có thể có dòng trống ở giữa
+                    # Lấy line tiếp theo là số tờ khai
+                    customs_number = lines[i + 2].strip()
+                    if customs_number.isdigit():  # Kiểm tra xem có phải là số không
+                        result['customs_number'] = customs_number
+                break
+
+        # Kiểm tra kết quả
+        if not all(result.values()):
+            missing = [k for k, v in result.items() if v is None]
+            print(f"Thiếu thông tin cho các trường: {', '.join(missing)}")
+
+        return result
+
+    except Exception as e:
+        print(f"Lỗi khi trích xuất thông tin: {str(e)}")
+        return None
+
+def extract_items(table_data):
+    """
+    Trích xuất thông tin các items từ dữ liệu bảng dựa theo vị trí tương đối
+    Return: List of dictionaries chứa thông tin của từng item
+    """
+    try:
+        items = []
+
+        # 1. Tìm số dòng dựa theo số lớn nhất giữa "STT" và "Biểu cước"
+        stt_index = table_data.index("STT")
+        bieu_cuoc_index = table_data.index("Biểu cước")
+        numbers_between = []
+        for i in range(stt_index, bieu_cuoc_index):
+            if table_data[i].isdigit():
+                numbers_between.append(int(table_data[i]))
+        num_rows = max(numbers_between) if numbers_between else 0
+
+        # 2. Tìm labels (descriptions)
+        start_label_index = table_data.index("(7) = (5)*(6)") + 1
+        labels = []
+        current_index = start_label_index
+        while current_index < len(table_data) and not table_data[current_index].startswith(('SEGU', 'UETU', 'TEMU', 'NSSU')):
+            if table_data[current_index] not in ['Đồng/Container']:
+                labels.append(table_data[current_index])
+            current_index += 1
+
+        # 3. Tìm container numbers
+        container_numbers = []
+        while current_index < len(table_data) and table_data[current_index].startswith(('SEGU', 'UETU', 'TEMU', 'NSSU')):
+            container_numbers.append(table_data[current_index])
+            current_index += 1
+
+        # 4. Skip qua các dòng "Đồng/Container"
+        while current_index < len(table_data) and table_data[current_index] == 'Đồng/Container':
+            current_index += 1
+
+        # 5. Lấy unit prices
+        unit_prices = []
+        for _ in range(len(container_numbers)):
+            if current_index < len(table_data):
+                unit_prices.append(table_data[current_index])
+                current_index += 1
+
+        # 6. Lấy quantities
+        quantities = []
+        for _ in range(len(container_numbers)):
+            if current_index < len(table_data):
+                quantities.append(table_data[current_index])
+                current_index += 1
+
+        # 7. Lấy amounts
+        amounts = []
+        for _ in range(len(container_numbers)):
+            if current_index < len(table_data):
+                amounts.append(table_data[current_index])
+                current_index += 1
+
+        # Tạo items
+        for i in range(len(container_numbers)):
+            item = {
+                'container_no': container_numbers[i],
+                'description': labels[i] if i < len(labels) else 'Container',
+                'unit': 'Đồng/Container',
+                'price': int(unit_prices[i].replace('.', '')),
+                'quantity': int(quantities[i]),
+                'amount': int(amounts[i].replace('.', ''))
+            }
+            items.append(item)
+
+        return items
+
+    except Exception as e:
+        print(f"Lỗi khi trích xuất items: {str(e)}")
+        print(f"Chi tiết bảng dữ liệu: {table_data}")
+        return []
+
 def main():
 
     # Giả lập việc trích xuất từ PDF
-    pdf_path = "data/BLHPH005504.pdf"
-    # pdf_path = "data/2.pdf"
-    text = extract_text_from_pdf(pdf_path)
 
-    if text:
-        print("Văn bản trích xuất:")
-        print(text)
-        # number_regex = extract_so_chung_tu_regex(text)
-        so_ct = extract_so_ct_by_lines(text)
-        print("So CT:", so_ct)
-        tax_number = extract_tax_number(text)
-        print("Tax Code:", tax_number)
-        customs_number = extract_customs_declaration(text)
-        items = extract_items(text)
-        print("Items:", items)
+    # pdf_path = "data/BLHPH005202.pdf"
+    # pdf_path = "data/BLHPH005504.pdf"
+    pdf_path = "data/4.pdf"
+
+    sections = extract_text_from_pdf(pdf_path)
+    if sections:
+        result = extract_header_info(sections['header'])
+        items = extract_items(sections['table'])
+        result['line_items'] = items
+
+        customs_number = result['customs_number'];
         if customs_number:
-            print("Số tờ khai hải quan:", customs_number)
-            # Thực hiện truy vấn SQL với số tờ khai
-            query_customs_info(customs_number)
-            print("Định dạng hợp lệ:", validate_customs_number(customs_number))
+            query_result = query_customs_info(customs_number)
+            print(f"Query result: {query_result}")
+            if query_result and len(query_result) > 0:
+                result.update({
+                    'jobId': query_result[0].TransID,
+                    'hawb': query_result[0].HWBNO,
+                    'nguoi_khai': query_result[0].nguoi_khai
+                })
+            else:
+                result.update({
+                    'jobId': '',
+                    'hawb': '',
+                    'nguoi_khai': ''
+                })
 
-
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         print("Không thể trích xuất văn bản từ file.")
 

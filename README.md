@@ -152,7 +152,99 @@ Lưu ý: File `.env` chứa thông tin nhạy cảm và đã được thêm vào
 - [Layout-Parser Docs](https://layout-parser.readthedocs.io/)
 - [Tesseract Documentation](https://tesseract-ocr.github.io/)
 - [SQL Server ODBC Documentation](https://learn.microsoft.com/en-us/sql/connect/odbc/microsoft-odbc-driver-for-sql-server)
+
+## Hướng dẫn build ứng dụng
+
+### Chuẩn bị môi trường
+
+1. Tạo và kích hoạt môi trường ảo:
+
+Windows:
+```bash
+python -m venv env
+.\env\Scripts\activate
 ```
+
+macOS:
+```bash
+python3 -m venv env
+source env/bin/activate
+```
+
+2. Cài đặt dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+### Build ứng dụng
+
+1. Chạy script build:
+```bash
+python build.py
+```
+
+2. File thực thi sẽ được tạo trong thư mục `dist`:
+- Windows: `dist/ImgExtraction.exe`
+- macOS: `dist/ImgExtraction`
+
+### Chạy ứng dụng đã build
+
+Windows:
+```bash
+.\dist\ImgExtraction.exe
+```
+
+macOS:
+```bash
+./dist/ImgExtraction
+```
+
+### Xử lý lỗi thường gặp
+
+1. Lỗi "Permission denied" trên macOS:
+```bash
+chmod +x ./dist/ImgExtraction
+```
+
+2. Lỗi không tìm thấy Chrome:
+- Đảm bảo đã cài đặt Google Chrome
+- Kiểm tra đường dẫn Chrome trong file `receipt_fetcher.py`
+
+3. Lỗi không tìm thấy templates/static:
+- Kiểm tra cấu trúc thư mục
+- Đảm bảo các file templates và static được copy vào dist
+
+4. Lỗi thiếu dependencies:
+```bash
+pip install -r requirements.txt --upgrade
+```
+
+### Cấu trúc thư mục sau khi build
+
+```
+dist/
+├── ImgExtraction (hoặc ImgExtraction.exe)
+├── templates/
+├── static/
+└── .env
+```
+
+### Ghi chú quan trọng
+
+1. Trước khi build:
+- Đảm bảo đã cài đặt đầy đủ dependencies
+- Kiểm tra file `.env` đã được cấu hình đúng
+- Đóng tất cả các instance của Chrome
+
+2. Sau khi build:
+- Kiểm tra file thực thi trong thư mục `dist`
+- Test ứng dụng trên môi trường mục tiêu
+- Backup file thực thi và các resources
+
+3. Môi trường production:
+- Copy toàn bộ thư mục `dist` tới máy đích
+- Cấu hình `.env` theo môi trường
+- Cấp quyền thực thi nếu cần
 
 # Cài đặt paddlepaddle (CPU version)
 python -m pip install paddlepaddle

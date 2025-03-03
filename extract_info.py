@@ -120,71 +120,6 @@ def append_to_google_sheet(extracted_info):
         send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
         return False
 
-def append_to_excel(extracted_info):
-    """Thêm thông tin vào file Excel template"""
-    try:
-        # Mở file Excel
-        excel_path = "./downloaded_pdfs/template_updated.xlsx"
-        wb = load_workbook(excel_path)
-        ws = wb.active
-
-        # Đếm số dòng hiện tại
-        current_row = ws.max_row
-
-        # Lấy danh sách items
-        print("Extracted info:", json.dumps(extracted_info, indent=2, ensure_ascii=False))
-        line_items = extracted_info.get('line_items', {}).get('items', [])
-        if not line_items:
-            print("Không có thông tin container để thêm vào Excel")
-            return False
-
-        # Thêm từng dòng cho mỗi item
-        for line in line_items:
-            # Tăng STT
-            current_row += 1
-
-            # Chuẩn bị dữ liệu cố định
-            fixed_data = {
-                'service_code': 'CL014920',
-                'vendor': 'VETC',
-                'charge_code': 'B_EWF',
-                'description': 'EXPRESS WAY FEES',
-                'unit': 'shipment'
-            }
-
-            # Tạo row data
-            row_data = [
-                current_row - 1,  # STT
-                extracted_info.get('so_ct', ''),  # Số chứng từ
-                fixed_data['service_code'],  # CL014920
-                fixed_data['vendor'],  # VETC
-                extracted_info.get('jobID', ''),  # JobID
-                extracted_info.get('hawb', ''),  # HAWB
-                fixed_data['charge_code'],  # B_EWF
-                fixed_data['description'],  # EXPRESS WAY FEES
-                line.get('quantity', ''),  # Số lượng
-                fixed_data['unit'],  # shipment
-                line.get('unit_price', ''),  # Đơn giá
-                '',  # Cột 12 để trống
-                line.get('total', ''),  # Thành tiền
-                '', '', '', '', '', '', '',  # Cột 14-20 để trống
-                line.get('container_no', ''),  # Số container
-                line.get('label', '')  # Loại container
-            ]
-
-            # Thêm dữ liệu vào worksheet
-            for col, value in enumerate(row_data, 1):
-                ws.cell(row=current_row, column=col, value=value)
-
-        # Lưu file
-        wb.save(excel_path)
-        print(f"Đã thêm {len(line_items)} dòng vào file Excel")
-        return True
-
-    except Exception as e:
-        print(f"Lỗi khi thêm dữ liệu vào Excel: {str(e)}")
-        return False
-
 def extract_text_from_pdf(pdf_path):
     """Trích xuất văn bản từ file PDF."""
     try:
@@ -193,13 +128,6 @@ def extract_text_from_pdf(pdf_path):
     except Exception as e:
         print(f"Lỗi khi trích xuất văn bản: {e}")
         return None
-
-def find_target_number(text, target="202509340850"):
-    """Tìm số mục tiêu trong văn bản."""
-    match = re.search(target, text)
-    if match:
-        return match.group()
-    return None
 
 def extract_so_chung_tu_regex(text):
     """Sử dụng regex để tìm số sau chữ 'Số:'"""
@@ -324,7 +252,7 @@ def extract_total_amount(text):
     """Trích xuất tổng số tiền từ văn bản"""
     lines = text.split('\n')
     for i, line in enumerate(lines):
-        if "Tổng cộng tiền phải nộp:" in line:
+        if "Tổng tiền phí phải nộp:" in line:
             # Lấy số tiền ở dòng tiếp theo
             if i + 1 < len(lines):
                 amount_str = lines[i + 1].strip()
@@ -506,7 +434,7 @@ def process_file_content(file):
         # Đọc và xử lý nội dung file
         if file.filename.endswith('.pdf'):
             file_bytes = io.BytesIO(file.read())
-            text = extract_text(file_bytes)
+            text = extract_text_from_pdf(file_bytes)
             file_content = file_bytes.getvalue()
         else:
             text = file.read().decode('utf-8')
@@ -639,7 +567,7 @@ def query_customs_info(customs_number):
 def main():
 
     # Giả lập việc trích xuất từ PDF
-    pdf_path = "data/BLHPH005202.pdf"
+    pdf_path = "data/BLHPH005504.pdf"
     # pdf_path = "data/2.pdf"
     text = extract_text_from_pdf(pdf_path)
 

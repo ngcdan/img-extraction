@@ -70,3 +70,6 @@ captcha_65.png	YKAJC
 captcha_66.png	CJQHY
 captcha_67.png	YNCRF
 captcha_68.png	CGHHN
+captcha_69.png	AGVTV
+captcha_70.png	HQAGE
+captcha_71.png	KJRRW

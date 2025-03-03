@@ -7,7 +7,7 @@ import io
 from datetime import datetime
 from utils import init_socketio, send_notification
 from receipt_fetcher import (
-    initialize_chrome, process_download, fill_login_info,
+    initialize_chrome, process_download,
     navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
 )
 from extract_info import process_file_content, query_customs_info, append_to_google_sheet
@@ -41,11 +41,27 @@ def start_download():
 
         so_tk = request.form.get('so_tk')
 
-        # Khởi tạo driver nếu chưa có hoặc đã bị đóng
-        if driver is None or (hasattr(driver, 'service') and not driver.service.is_connectable()):
+        # Kiểm tra và khởi tạo lại driver nếu cần
+        try:
+            # Thử truy cập một thuộc tính để kiểm tra driver còn hoạt động không
+            if driver is not None:
+                driver.current_url
+        except Exception as e:
+            print(f"Driver không khả dụng, khởi tạo lại: {str(e)}")
+            try:
+                if driver is not None:
+                    driver.quit()
+            except:
+                pass
+            driver = None
+
+        # Khởi tạo driver mới nếu cần
+        if driver is None:
             driver = initialize_chrome()
             if not driver:
+                send_notification("Không thể khởi tạo Chrome", "error")
                 return jsonify({'error': 'Không thể khởi tạo Chrome'})
+            time.sleep(2)  # Đợi driver khởi động hoàn toàn
 
         # Reset trạng thái download
         download_status = {
@@ -56,10 +72,26 @@ def start_download():
             'status': 'running'
         }
 
+        def download_wrapper():
+            global driver, download_status
+            try:
+                process_download(driver, username, so_tk, download_status)
+            except Exception as e:
+                error_msg = f"Lỗi trong quá trình tải: {str(e)}"
+                print(error_msg)
+                send_notification(error_msg, "error")
+                download_status['status'] = 'error'
+                # Thử khởi tạo lại driver nếu có lỗi
+                try:
+                    if driver is not None:
+                        driver.quit()
+                except:
+                    pass
+                driver = None
+
         # Bắt đầu process download trong thread riêng
         download_thread = threading.Thread(
-            target=process_download,
-            args=(driver, username, so_tk, download_status)
+            target=download_wrapper
         )
         download_thread.daemon = True
         download_thread.start()
@@ -69,6 +101,13 @@ def start_download():
     except Exception as e:
         error_message = f"Lỗi khi bắt đầu tải: {str(e)}"
         send_notification(error_message, "error")
+        # Thử khởi tạo lại driver nếu có lỗi
+        try:
+            if driver is not None:
+                driver.quit()
+        except:
+            pass
+        driver = None
         return jsonify({'error': error_message})
 
 @app.route('/status')

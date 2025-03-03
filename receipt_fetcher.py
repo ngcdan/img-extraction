@@ -177,27 +177,54 @@ def process_download(driver, username, so_tk=None, download_status=None):
 
 def fill_login_info(driver, username, password, max_retries=3):
     """Điền thông tin đăng nhập với retry và explicit wait"""
-    wait = WebDriverWait(driver, 10)
+    wait = WebDriverWait(driver, 10)  # Đợi tối đa 10 giây
     retry_count = 0
+    login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
 
     while retry_count < max_retries:
         try:
-            # Đợi cho đến khi form login xuất hiện
-            username_input = wait.until(EC.presence_of_element_located((By.ID, "UserName")))
-            password_input = driver.find_element(By.ID, "Password")
+            # Kiểm tra URL hiện tại
+            current_url = driver.current_url
+            if current_url != login_url:
+                print(f"URL hiện tại không phải trang đăng nhập: {current_url}")
+                # Tìm tab có URL đăng nhập
+                login_tab_found = False
+                for handle in driver.window_handles:
+                    driver.switch_to.window(handle)
+                    if driver.current_url == login_url:
+                        print("Đã tìm thấy tab đăng nhập")
+                        login_tab_found = True
+                        break
 
-            # Điền thông tin
+                if not login_tab_found:
+                    print("Không tìm thấy tab đăng nhập")
+                    return False
+
+            # Đợi cho đến khi form login xuất hiện
+            wait.until(EC.presence_of_element_located((By.ID, "form-username")))
+            wait.until(EC.element_to_be_clickable((By.ID, "form-username")))
+
+            # Tìm và điền username
+            username_input = driver.find_element(By.ID, "form-username")
             username_input.clear()
             username_input.send_keys(username)
+            print("Đã điền username")
+
+            # Đợi và điền password
+            wait.until(EC.presence_of_element_located((By.ID, "form-password")))
+            password_input = driver.find_element(By.ID, "form-password")
             password_input.clear()
             password_input.send_keys(password)
+            print("Đã điền password")
 
             return True
-        except Exception as e:
-            send_notification(f"Lỗi khi điền thông tin đăng nhập (lần {retry_count + 1}): {str(e)}", "error")
+
+        except (TimeoutException, NoSuchElementException) as e:
             retry_count += 1
+            print(f"Lần thử {retry_count}: Không tìm thấy form đăng nhập. Đang thử lại...")
+
             if retry_count < max_retries:
-                driver.refresh()
+                driver.get(login_url)  # Refresh về trang đăng nhập
                 time.sleep(2)
             else:
                 print(f"Lỗi sau {max_retries} lần thử: {str(e)}")

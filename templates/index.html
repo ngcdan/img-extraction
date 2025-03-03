@@ -265,8 +265,8 @@ function uploadFile() {
       }
 
       // Hiển thị JobId nếu có
-      if (data.data.jobID) {
-        jobIdDisplay.textContent = data.data.hawb;
+      if (data.data.jobId) {
+        jobIdDisplay.textContent = data.data.jobId;
         jobIdDisplay.classList.add('filled');
         setTimeout(() => jobIdDisplay.classList.remove('filled'), 2000);
       } else {
@@ -322,8 +322,23 @@ function useExtractedInfo() {
             return;
         }
 
-        // Hiển thị status container
-        document.getElementById('status').style.display = 'block';
+        // Disable nút download và hiển thị trạng thái loading
+        const downloadBtn = document.querySelector('button[onclick="startDownload()"]');
+        if (downloadBtn) {
+            downloadBtn.disabled = true;
+            downloadBtn.textContent = 'Đang xử lý...';
+        }
+
+        // Reset và hiển thị status container
+        const statusContainer = document.getElementById('status');
+        if (statusContainer) {
+            statusContainer.style.display = 'block';
+            document.getElementById('current').textContent = '0';
+            document.getElementById('total').textContent = '0';
+            document.getElementById('success').textContent = '0';
+            document.getElementById('failed').textContent = '0';
+            document.getElementById('progress').style.width = '0%';
+        }
 
         // Gửi request
         fetch('/start', {
@@ -333,20 +348,33 @@ function useExtractedInfo() {
             },
             body: new URLSearchParams({
                 'username': username,
-                'so_tk': so_tk
+                'so_tk': so_tk || '' // Đảm bảo so_tk không undefined
             })
         })
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
         .then(data => {
             if (data.error) {
                 showToast(data.error, 'error');
             } else {
                 showToast('Bắt đầu tải...', 'info');
+                startStatusCheck(); // Bắt đầu kiểm tra trạng thái
             }
         })
         .catch(error => {
             console.error('Error:', error);
-            showToast('Lỗi khi gửi yêu cầu', 'error');
+            showToast('Lỗi khi gửi yêu cầu: ' + error.message, 'error');
+        })
+        .finally(() => {
+            // Enable lại nút download
+            if (downloadBtn) {
+                downloadBtn.disabled = false;
+                downloadBtn.textContent = 'Bắt đầu tải';
+            }
         });
     }
 

@@ -66,3 +66,15 @@ captcha_61.png	GTDUI
 captcha_62.png	VSWPD
 captcha_63.png	VSWPD
 captcha_64.png	UUPDQ
+captcha_65.png	YKAJC
+captcha_66.png	CJQHY
+captcha_67.png	YNCRF
+captcha_68.png	CGHHN
+captcha_69.png	AGVTV
+captcha_70.png	HQAGE
+captcha_71.png	KJRRW
+captcha_72.png	GNVFS
+captcha_73.png	EDLRH
+captcha_74.png	YERES
+captcha_75.png	AQMVR
+captcha_76.png	QEYQY

@@ -1,42 +1,19 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 import threading
 from flask_cors import CORS
-from flask_socketio import SocketIO
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
 import time
 import os
-import platform
-import subprocess
-from selenium.webdriver.chrome.options import Options
-import PyPDF2
 import io
-from extract_info import process_file_content, query_customs_info, append_to_excel
-from pdfminer.high_level import extract_text
 from datetime import datetime
-from fetch_bien_lai import navigate_to_login, get_chrome_driver, fill_login_info, navigate_to_bien_lai_list, download_pdf, save_captcha_and_label
-import json
-import requests
+from utils import init_socketio, send_notification
+from receipt_fetcher import ( initialize_chrome, process_download)
+from extract_info import process_file_content
 
 app = Flask(__name__)
-# Cấu hình CORS cho cả Flask và Socket.IO
 CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app,
-    cors_allowed_origins="*",
-    async_mode='threading'
-)
+socketio = init_socketio(app)
 
-def send_notification(message, type="info"):
-    """Gửi thông báo đến client"""
-    socketio.emit('notification', {
-        'message': message,
-        'type': type  # info, success, warning, error
-    })
-
-# Biến global để lưu trạng thái
+# Global variables
 driver = None
 download_status = {
     'total': 0,
@@ -45,166 +22,6 @@ download_status = {
     'failed': 0,
     'status': 'idle'  # idle, running, completed, error
 }
-
-def initialize_chrome():
-    """Khởi tạo Chrome và mở trang web"""
-    global driver
-    try:
-        send_notification("Đang khởi tạo Chrome driver...", "info")
-
-        # Xác định đường dẫn profile mặc định của Chrome
-        if platform.system() == 'Windows':
-            default_profile = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
-        else:  # macOS
-            default_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
-
-        # Xác định đường dẫn Chrome
-        if platform.system() == 'Windows':
-            chrome_path = 'C:\\Program Files\\Google Chrome\\chrome.exe'
-            if not os.path.exists(chrome_path):
-                chrome_path = 'C:\\Program Files (x86)\\Google Chrome\\chrome.exe'
-        else:  # macOS
-            chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-
-        # Kiểm tra xem Chrome có đang chạy với debug port không
-        chrome_running = False
-        try:
-            response = requests.get('http://127.0.0.1:9222/json/version')
-            if response.status_code == 200:
-                chrome_running = True
-                send_notification("Đã tìm thấy Chrome đang chạy với debug port", "info")
-        except:
-            send_notification("Khởi động Chrome mới với debug port...", "info")
-
-        if not chrome_running:
-            # Khởi động Chrome mới mà không cần tắt các instance hiện tại
-            subprocess.Popen([
-                chrome_path,
-                f'--user-data-dir={default_profile}',
-                '--remote-debugging-port=9222',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--start-maximized',
-                '--disable-gpu',
-                '--disable-dev-shm-usage',
-                'about:blank'
-            ])
-            time.sleep(3)  # Đợi Chrome khởi động
-
-        # Kết nối với Chrome debug port
-        chrome_options = Options()
-        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-
-        try:
-            driver = webdriver.Chrome(options=chrome_options)
-            send_notification("Đã kết nối với Chrome thành công", "success")
-            return True
-        except Exception as e:
-            error_message = f"Lỗi khi kết nối với Chrome: {str(e)}"
-            send_notification(error_message, "error")
-            return False
-
-    except Exception as e:
-        error_message = f"Lỗi khi khởi tạo Chrome: {str(e)}"
-        send_notification(error_message, "error")
-        return False
-
-def process_download(username, so_tk=None):
-    global driver, download_status
-    try:
-        # Lưu handle của tab hiện tại
-        current_handle = driver.current_window_handle
-
-        # Mở trang đăng nhập trong tab mới
-        driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
-        time.sleep(1)
-
-        # Chuyển đến tab mới
-        # new_handle = driver.window_handles[-1]
-        # driver.switch_to.window(new_handle)
-
-        # Đăng nhập
-        if fill_login_info(driver, username, username):
-            print("Đăng nhập thành công")
-            send_notification("Đăng nhập thành công", "success")
-        else:
-            raise Exception("Không thể đăng nhập")
-
-        # Thêm script theo dõi captcha
-        js_script = """
-        window.captchaValue = '';
-        window.getCaptchaValue = function() {
-            return window.captchaValue;
-        };
-        const captchaInput = document.getElementById('CaptchaInputText');
-        if (captchaInput) {
-            captchaInput.addEventListener('blur', function() {
-                window.captchaValue = this.value;
-            });
-            captchaInput.addEventListener('input', function() {
-                if (this.value.length >= 5) {
-                    window.captchaValue = this.value;
-                }
-            });
-        }
-        """
-        driver.execute_script(js_script)
-
-        # Đợi đăng nhập thành công và lưu captcha
-        current_url = driver.current_url
-        timeout = time.time() + 60  # timeout 60 giây
-        captcha_saved = False
-        login_success = False
-
-        while time.time() < timeout:
-            try:
-                if not captcha_saved:
-                    captcha_text = driver.execute_script("return window.getCaptchaValue()")
-                    if captcha_text and len(captcha_text) >= 5:
-                        save_captcha_and_label(driver, captcha_text)
-                        captcha_saved = True
-                        print("Đã lưu thông tin captcha")
-
-                if current_url != driver.current_url:
-                    if driver.current_url == "http://thuphi.haiphong.gov.vn:8222/Home":
-                        print("Đăng nhập thành công")
-                        login_success = True
-                        break
-                time.sleep(1)
-            except Exception as e:
-                print(f"Lỗi khi kiểm tra: {e}")
-                continue
-
-        if not login_success:
-            raise Exception("Đăng nhập không thành công sau 60 giây")
-
-        # Điều hướng và tải file
-        navigate_to_bien_lai_list(driver, so_tk)
-
-        wait = WebDriverWait(driver, 10)
-        links = wait.until(EC.presence_of_all_elements_located((
-            By.CSS_SELECTOR,
-            "a.color-blue.underline[href^='http://113.160.97.58:8224/Viewer/HoaDonViewer.aspx?mhd='][href$='iscd=1']"
-        )))
-
-        download_status['total'] = len(links)
-
-        for i, link in enumerate(links, 1):
-            if 'Xem' in link.text:
-                download_status['current'] = i
-                if download_pdf(driver, link):
-                    download_status['success'] += 1
-                else:
-                    download_status['failed'] += 1
-                time.sleep(1)
-
-        download_status['status'] = 'completed'
-
-    except Exception as e:
-        error_msg = f"Lỗi: {str(e)}"
-        print(error_msg)
-        send_notification(error_msg, "error")
-        download_status['status'] = 'error'
 
 @app.route('/')
 def index():
@@ -221,11 +38,27 @@ def start_download():
 
         so_tk = request.form.get('so_tk')
 
-        # Khởi tạo driver nếu chưa có hoặc đã bị đóng
-        if driver is None or (hasattr(driver, 'service') and not driver.service.is_connectable()):
-            success = initialize_chrome()
-            if not success:
+        # Kiểm tra và khởi tạo lại driver nếu cần
+        try:
+            # Thử truy cập một thuộc tính để kiểm tra driver còn hoạt động không
+            if driver is not None:
+                driver.current_url
+        except Exception as e:
+            print(f"Driver không khả dụng, khởi tạo lại: {str(e)}")
+            try:
+                if driver is not None:
+                    driver.quit()
+            except:
+                pass
+            driver = None
+
+        # Khởi tạo driver mới nếu cần
+        if driver is None:
+            driver = initialize_chrome()
+            if not driver:
+                send_notification("Không thể khởi tạo Chrome", "error")
                 return jsonify({'error': 'Không thể khởi tạo Chrome'})
+            time.sleep(2)  # Đợi driver khởi động hoàn toàn
 
         # Reset trạng thái download
         download_status = {
@@ -236,10 +69,26 @@ def start_download():
             'status': 'running'
         }
 
+        def download_wrapper():
+            global driver, download_status
+            try:
+                process_download(driver, username, so_tk, download_status)
+            except Exception as e:
+                error_msg = f"Lỗi trong quá trình tải: {str(e)}"
+                print(error_msg)
+                send_notification(error_msg, "error")
+                download_status['status'] = 'error'
+                # Thử khởi tạo lại driver nếu có lỗi
+                try:
+                    if driver is not None:
+                        driver.quit()
+                except:
+                    pass
+                driver = None
+
         # Bắt đầu process download trong thread riêng
         download_thread = threading.Thread(
-            target=process_download,
-            args=(username, so_tk)
+            target=download_wrapper
         )
         download_thread.daemon = True
         download_thread.start()
@@ -249,6 +98,13 @@ def start_download():
     except Exception as e:
         error_message = f"Lỗi khi bắt đầu tải: {str(e)}"
         send_notification(error_message, "error")
+        # Thử khởi tạo lại driver nếu có lỗi
+        try:
+            if driver is not None:
+                driver.quit()
+        except:
+            pass
+        driver = None
         return jsonify({'error': error_message})
 
 @app.route('/status')
@@ -260,92 +116,19 @@ def upload_file():
     """Route xử lý upload file và trích xuất thông tin"""
     try:
         if 'file' not in request.files:
-            return jsonify({'error': 'Không tìm thấy file'})
+            return jsonify({'success': False, 'error': 'Không tìm thấy file'})
 
         file = request.files['file']
-        if not file or not file.filename:
-            return jsonify({'error': 'Không có file được chọn'})
+        result = process_file_content(file)
 
-        print(f"Đã nhận file: {file.filename}")
-
-        try:
-            # Đọc và xử lý nội dung file
-            if file.filename.endswith('.pdf'):
-                file_bytes = io.BytesIO(file.read())
-                text = extract_text(file_bytes)
-                file_content = file_bytes.getvalue()  # Lưu nội dung PDF
-            else:
-                text = file.read().decode('utf-8')
-                file_content = file.read()  # Lưu nội dung file
-
-            # Trích xuất thông tin
-            extracted_info = process_file_content(text)
-
-            date_str = extracted_info['date']
-            # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
-            ngay_formatted = date_str.replace('/', '')
-
-            # Tạo cấu trúc thư mục
-            base_dir = "downloaded_pdfs"
-            date_dir = os.path.join(base_dir, ngay_formatted)
-            so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
-            results = query_customs_info(extracted_info['customs_number'])
-
-            # Kiểm tra kết quả và lấy HWBNO
-            if results and len(results) > 0:
-                extracted_info['jobID'] = results[0].TransID
-                extracted_info['hawb'] = results[0].HWBNO
-                extracted_info['nguoiKhai'] = results[0].nguoi_khai
-            else:
-                extracted_info['jobID'] = ''
-                extracted_info['hawb'] = ''
-                extracted_info['nguoiKhai'] = ''
-
-            # Thêm dữ liệu vào Excel
-            # Lấy danh sách items
-            excel_success = append_to_excel(extracted_info)
-
-            # Tạo các thư mục nếu chưa tồn tại
-            for directory in [base_dir, date_dir, so_tk_dir]:
-                if not os.path.exists(directory):
-                    os.makedirs(directory)
-                    print(f"Đã tạo thư mục: {directory}")
-
-            # Đường dẫn đầy đủ của file
-            full_path = os.path.join(so_tk_dir, file.filename)
-
-            # Kiểm tra nếu file đã tồn tại
-            if os.path.exists(full_path):
-                base_name, ext = os.path.splitext(file.filename)
-                counter = 1
-                while os.path.exists(full_path):
-                    new_filename = f"{base_name}_{counter}{ext}"
-                    full_path = os.path.join(so_tk_dir, new_filename)
-                    counter += 1
-
-            # Lưu file
-            with open(full_path, 'wb') as f:
-                if file.filename.endswith('.pdf'):
-                    f.write(file_content)
-                else:
-                    f.write(file_content.encode('utf-8'))
-
-            print(f"Đã lưu file: {full_path}")
-
-            return jsonify({
-                'success': True,
-                'message': 'Trích xuất và lưu file thành công',
-                'data': extracted_info,
-                'saved_path': full_path
-            })
-
-        except Exception as e:
-            print(f"Lỗi khi xử lý file: {e}")
-            return jsonify({'error': f'Lỗi khi xử lý file: {str(e)}'})
+        return jsonify(result)
 
     except Exception as e:
         print(f"Lỗi server: {e}")
-        return jsonify({'error': f'Lỗi server: {str(e)}'})
+        return jsonify({
+            'success': False,
+            'error': f'Lỗi server: {str(e)}'
+        })
 
 def close_specific_tabs(url_pattern):
     """Đóng các tab có địa chỉ chứa url_pattern"""

@@ -1,15 +1,25 @@
+import sys
+import os
 from flask import Flask, render_template, request, jsonify, send_file
 import threading
 from flask_cors import CORS
 import time
-import os
 import io
 from datetime import datetime
 from utils import init_socketio, send_notification
 from receipt_fetcher import ( initialize_chrome, process_download)
 from extract_info import process_file_content
 
-app = Flask(__name__)
+def resource_path(relative_path):
+    """Lấy đường dẫn tuyệt đối cho resource khi chạy từ exe"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+app = Flask(__name__,
+    template_folder=resource_path('templates'),
+    static_folder=resource_path('static')
+)
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = init_socketio(app)
 

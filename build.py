@@ -111,6 +111,14 @@ def build_macos():
     app_name = "ImgExtraction"
     bundle_identifier = "com.augmentcode.imgextraction"
 
+    # Kiểm tra icon file
+    icon_path = os.path.join(current_dir, 'static', 'favicon.icns')
+    icon_param = []
+    if os.path.exists(icon_path):
+        icon_param = ['--icon=' + icon_path]
+    else:
+        print("Cảnh báo: Không tìm thấy file icon (.icns), sẽ build không có icon")
+
     params = [
         'app.py',
         f'--name={app_name}',
@@ -118,8 +126,7 @@ def build_macos():
         '--windowed',
         '--clean',
         '--noconfirm',
-        '--icon=static/favicon.icns',  # Icon cho macOS (cần convert từ .ico sang .icns)
-    ]
+    ] + icon_param
 
     # Thêm các file bổ sung
     for src, dst in get_additional_files():
@@ -136,55 +143,80 @@ def build_macos():
     # Thêm các options đặc biệt cho macOS
     params.extend([
         '--collect-submodules=selenium',
-        '--collect-submodules=webdriver_manager'
+        '--collect-submodules=webdriver_manager',
+        '--collect-all=webdriver_manager',
+        '--collect-all=selenium'
     ])
 
-    PyInstaller.__main__.run(params)
+    try:
+        PyInstaller.__main__.run(params)
 
-    # Tạo cấu trúc .app
-    app_dir = os.path.join('dist', f"{app_name}.app")
-    contents_dir = os.path.join(app_dir, 'Contents')
-    macos_dir = os.path.join(contents_dir, 'MacOS')
-    resources_dir = os.path.join(contents_dir, 'Resources')
+        # Tạo cấu trúc .app
+        app_dir = os.path.join('dist', f"{app_name}.app")
+        contents_dir = os.path.join(app_dir, 'Contents')
+        macos_dir = os.path.join(contents_dir, 'MacOS')
+        resources_dir = os.path.join(contents_dir, 'Resources')
+        frameworks_dir = os.path.join(contents_dir, 'Frameworks')
 
-    # Tạo các thư mục cần thiết
-    for directory in [contents_dir, macos_dir, resources_dir]:
-        os.makedirs(directory, exist_ok=True)
+        # Tạo các thư mục cần thiết
+        for directory in [contents_dir, macos_dir, resources_dir, frameworks_dir]:
+            os.makedirs(directory, exist_ok=True)
 
-    # Di chuyển nội dung
-    src_dir = os.path.join('dist', app_name)
-    for item in os.listdir(src_dir):
-        shutil.move(os.path.join(src_dir, item), macos_dir)
+        # Di chuyển nội dung
+        src_dir = os.path.join('dist', app_name)
+        if os.path.exists(src_dir):
+            for item in os.listdir(src_dir):
+                src_item = os.path.join(src_dir, item)
+                dst_item = os.path.join(macos_dir, item)
+                try:
+                    if os.path.exists(dst_item):
+                        if os.path.isdir(dst_item):
+                            shutil.rmtree(dst_item)
+                        else:
+                            os.remove(dst_item)
+                    shutil.move(src_item, dst_item)
+                except Exception as e:
+                    print(f"Cảnh báo: Không thể di chuyển {item}: {e}")
 
-    # Xóa thư mục cũ
-    shutil.rmtree(src_dir)
+            # Xóa thư mục cũ
+            shutil.rmtree(src_dir)
 
-    # Tạo Info.plist
-    plist_data = {
-        'CFBundleName': app_name,
-        'CFBundleDisplayName': 'Image Extraction',
-        'CFBundleIdentifier': bundle_identifier,
-        'CFBundleExecutable': app_name,
-        'CFBundlePackageType': 'APPL',
-        'CFBundleShortVersionString': '1.0.0',
-        'CFBundleVersion': '1.0.0',
-        'LSMinimumSystemVersion': '10.13',
-        'NSHighResolutionCapable': True,
-        'NSAppTransportSecurity': {
-            'NSAllowsArbitraryLoads': True
+        # Tạo Info.plist với thêm quyền
+        plist_data = {
+            'CFBundleName': app_name,
+            'CFBundleDisplayName': 'Image Extraction',
+            'CFBundleIdentifier': bundle_identifier,
+            'CFBundleExecutable': app_name,
+            'CFBundlePackageType': 'APPL',
+            'CFBundleShortVersionString': '1.0.0',
+            'CFBundleVersion': '1.0.0',
+            'LSMinimumSystemVersion': '10.13',
+            'NSHighResolutionCapable': True,
+            'NSAppTransportSecurity': {
+                'NSAllowsArbitraryLoads': True
+            },
+            'NSPrincipalClass': 'NSApplication',
+            'LSApplicationCategoryType': 'public.app-category.utilities',
+            # Thêm quyền cần thiết
+            'NSAppleEventsUsageDescription': 'App needs to automate browser',
+            'NSCameraUsageDescription': 'App needs to access camera',
+            'NSMicrophoneUsageDescription': 'App needs to access microphone',
         }
-    }
 
-    plist_file = os.path.join(contents_dir, 'Info.plist')
-    with open(plist_file, 'wb') as f:
-        plistlib.dump(plist_data, f)
+        plist_file = os.path.join(contents_dir, 'Info.plist')
+        with open(plist_file, 'wb') as f:
+            plistlib.dump(plist_data, f)
 
-    # Đặt quyền thực thi
-    executable_path = os.path.join(macos_dir, app_name)
-    if os.path.exists(executable_path):
-        os.chmod(executable_path, 0o755)
+        # Đặt quyền thực thi
+        executable_path = os.path.join(macos_dir, app_name)
+        if os.path.exists(executable_path):
+            os.chmod(executable_path, 0o755)
 
-    print(f"Đã build xong package macOS tại dist/{app_name}.app")
+        print(f"Đã build xong package macOS tại dist/{app_name}.app")
+
+    except Exception as e:
+        print(f"Lỗi trong quá trình build macOS: {str(e)}")
+        raise
 
 def main():
     """Hàm chính để chạy build"""

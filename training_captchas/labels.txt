@@ -105,3 +105,5 @@ captcha_100.png	NDVPG
 captcha_101.png	WJCPG
 captcha_102.png	JDABW
 captcha_103.png	HDSIA
+captcha_104.png	BVZJC
+captcha_105.png	PNRYI

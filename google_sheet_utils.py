@@ -66,7 +66,8 @@ def prepare_row_data(line_item, extracted_info, current_row):
         line_item.get('unit_price', ''),
         '',  # Cột 12 để trống
         line_item.get('amount', ''),
-        '', '', '', '',
+        extracted_info.get('tax_number', '') != '0303482440',
+        '', '', '',
         extracted_info.get('tax_number'),
         extracted_info.get('partner_invoice_name'),
         '',  # Cột 20 để trống (Notes)

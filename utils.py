@@ -1,15 +1,33 @@
 from flask_socketio import SocketIO, emit
 import json
+import os
+import sys
 
 socketio = None
 
 def init_socketio(app):
     global socketio
-    socketio = SocketIO(app,
-                       cors_allowed_origins="*",
-                       async_mode='eventlet',
-                       logger=True,
-                       engineio_logger=True)
+
+    # Luôn sử dụng threading mode khi đã build
+    if getattr(sys, 'frozen', False):
+        async_mode = 'threading'
+    else:
+        async_mode = None  # Để Flask-SocketIO tự chọn mode tốt nhất
+
+    print(f"Initializing SocketIO with async_mode: {async_mode}")
+
+    socketio = SocketIO(
+        app,
+        cors_allowed_origins="*",
+        async_mode=async_mode,
+        logger=True,
+        engineio_logger=True,
+        ping_timeout=60,
+        ping_interval=25,
+        max_http_buffer_size=1e8,
+        manage_session=False,
+        websocket=False  # Disable WebSocket khi build
+    )
     return socketio
 
 def send_notification(message, type="info"):

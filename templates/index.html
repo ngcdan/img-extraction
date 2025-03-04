@@ -9,11 +9,9 @@
       <h1>Tải Biên Lai Tự Động</h1>
 
       <div class="upload-section">
-        <h2>Trích xuất thông tin từ file</h2>
-
         <div class="upload-form">
           <div class="file-drop-zone" id="dropZone">
-            <input type="file" id="upload-file" accept=".txt,.pdf" style="display: none;">
+            <input type="file" id="upload-file" accept=".pdf" style="display: none;">
             <div class="drop-zone-content">
               <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" width="50" height="50" viewBox="0 0 24 24">
                 <path
@@ -30,18 +28,13 @@
               </div>
             </div>
           </div>
-          <small class="hint">Chỉ chấp nhận file .txt hoặc .pdf</small>
+          <small class="hint">Chỉ chấp nhận file .pdf</small>
           <button class="extract-btn" onclick="uploadFile()" disabled>Trích xuất thông tin</button>
         </div>
       </div>
 
       <div class="form-container"
         style="display: flex; flex-direction: column; align-items: center; max-width: 500px; margin: 0 auto;">
-
-        <div class="form-group py-2">
-          <label>Job No: <span id="jobId_display" class="jobid-value me-2">...</span></label>
-          <label>Hawb No: <span id="hawb_display" class="hawb-value">...</span></label>
-        </div>
 
         <div class="input-group" style="width: 100%;">
           <label for="username">
@@ -64,7 +57,7 @@
             id="so_tk"
             class="form-input"
             placeholder="Nhập số tờ khai nếu cần">
-          <small class="hint">Để trống nếu muốn tải tất cả biên lai</small>
+          <small class="hint">Để trống nếu muốn tải tất cả biên lai trong tháng</small>
         </div>
 
         <button
@@ -100,23 +93,26 @@
 
     <script>
 
-        // Kết nối Socket.IO với các options
+        // Khởi tạo Socket.IO với long-polling
         const socket = io({
-            transports: ['websocket'],
-            cors: {
-                origin: "*",
-                methods: ["GET", "POST"]
-            }
+            transports: ['polling'],
+            upgrade: false,
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: Infinity
         });
 
-        // Xử lý sự kiện kết nối
-        socket.on('connect', function() {
+        socket.on('connect', () => {
             console.log('Connected to server');
         });
 
-        socket.on('connect_error', (error) => {
-            console.log('Connection error:', error);
-            showToast('Lỗi kết nối đến server', 'error');
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+        });
+
+        socket.on('notification', (data) => {
+            showNotification(data.message, data.type);
         });
 
         // Hàm tạo và hiển thị toast
@@ -249,8 +245,6 @@ function uploadFile() {
       // Tự động điền thông tin vào form
       const usernameInput = document.getElementById('username');
       const soTkInput = document.getElementById('so_tk');
-      const hawbDisplay = document.getElementById('hawb_display');
-      const jobIdDisplay = document.getElementById('jobId_display');
 
       if (data.data.tax_number) {
         usernameInput.value = data.data.tax_number;
@@ -262,24 +256,6 @@ function uploadFile() {
         soTkInput.value = data.data.customs_number;
         soTkInput.classList.add('filled');
         setTimeout(() => soTkInput.classList.remove('filled'), 2000);
-      }
-
-      // Hiển thị JobId nếu có
-      if (data.data.jobId) {
-        jobIdDisplay.textContent = data.data.jobId;
-        jobIdDisplay.classList.add('filled');
-        setTimeout(() => jobIdDisplay.classList.remove('filled'), 2000);
-      } else {
-        jobIdDisplay.textContent = '...';
-      }
-
-      // Hiển thị HAWB nếu có
-      if (data.data.hawb) {
-        hawbDisplay.textContent = data.data.hawb;
-        hawbDisplay.classList.add('filled');
-        setTimeout(() => hawbDisplay.classList.remove('filled'), 2000);
-      } else {
-        hawbDisplay.textContent = '...';
       }
 
       showMessage('Đã điền thông tin từ file', 'success');

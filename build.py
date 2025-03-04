@@ -36,6 +36,7 @@ def collect_all_files():
         'downloads',
         '.env',
         'service-account-key.json',
+        'driver-service-account.json',
         'app.py',
         'utils.py',
         'receipt_fetcher.py',

@@ -4,12 +4,6 @@ import os
 import shutil
 import platform
 import glob
-import plistlib
-
-def resource_path(relative_path):
-    """Lấy đường dẫn tuyệt đối đến tài nguyên"""
-    base_path = getattr(sys, '_MEIPASS', os.path.abspath("."))
-    return os.path.join(base_path, relative_path)
 
 def clean_build():
     """Dọn dẹp các thư mục và file build cũ"""
@@ -19,105 +13,105 @@ def clean_build():
     for dir_name in dirs_to_clean:
         if os.path.exists(dir_name):
             try:
-                # Thử xóa từng file trong thư mục trước
-                for root, dirs, files in os.walk(dir_name, topdown=False):
-                    for name in files:
-                        try:
-                            os.remove(os.path.join(root, name))
-                        except Exception as e:
-                            print(f"Không thể xóa file {name}: {e}")
-                    for name in dirs:
-                        try:
-                            os.rmdir(os.path.join(root, name))
-                        except Exception as e:
-                            print(f"Không thể xóa thư mục {name}: {e}")
-
-                # Sau đó xóa thư mục gốc
-                os.rmdir(dir_name)
+                shutil.rmtree(dir_name)
                 print(f"Đã xóa thư mục: {dir_name}")
             except Exception as e:
-                print(f"Cảnh báo: Không thể xóa hoàn toàn thư mục {dir_name}: {e}")
-                # Tiếp tục build ngay cả khi không xóa được hoàn toàn
+                print(f"Cảnh báo: Không thể xóa thư mục {dir_name}: {e}")
 
     for file_pattern in files_to_clean:
-        try:
-            for file_path in glob.glob(file_pattern):
-                try:
-                    os.remove(file_path)
-                    print(f"Đã xóa file: {file_path}")
-                except Exception as e:
-                    print(f"Không thể xóa file {file_path}: {e}")
-        except Exception as e:
-            print(f"Lỗi khi tìm file {file_pattern}: {e}")
+        for file_path in glob.glob(file_pattern):
+            try:
+                os.remove(file_path)
+                print(f"Đã xóa file: {file_path}")
+            except Exception as e:
+                print(f"Không thể xóa file {file_path}: {e}")
 
-def get_additional_files():
-    """Danh sách các file và thư mục cần thêm vào package"""
-    additional_files = [
-        ('templates', 'templates'),
-        ('static', 'static'),
-        ('.env', '.'),
-        ('service-account-key.json', '.'),
-        ('cookies', 'cookies'),  # Thêm thư mục cookies
-        ('downloads', 'downloads'),  # Thêm thư mục downloads
+def collect_all_files():
+    """Thu thập tất cả các file và thư mục cần thiết"""
+    items_to_include = [
+        'venv',
+        'templates',
+        'static',
+        'cookies',
+        'downloads',
+        '.env',
+        'service-account-key.json',
+        'app.py',
+        'utils.py',
+        'receipt_fetcher.py',
+        'extract_info.py',
+        'google_sheet_utils.py',
+        'google_drive_utils.py',
+        'requirements.txt'
     ]
-    return additional_files
 
-def get_hidden_imports():
-    """Danh sách các module cần import"""
-    return [
+    current_dir = os.path.abspath(".")
+    data_files = []
+
+    for item in items_to_include:
+        item_path = os.path.join(current_dir, item)
+        if os.path.exists(item_path):
+            if os.path.isdir(item_path):
+                data_files.append((item, item_path))
+            else:
+                data_files.append((item, item_path))
+
+    return data_files
+
+def build_windows():
+    """Build ứng dụng cho Windows"""
+    print("Đang build cho Windows...")
+    clean_build()
+
+    app_name = "ImgExtraction-windows"
+    separator = ';'
+    data_files = collect_all_files()
+
+    params = [
+        'app.py',
+        f'--name={app_name}',
+        '--onefile',
+        '--noconsole',
+        '--clean',
+        '--noconfirm',
+    ]
+
+    # Thêm icon cho Windows
+    icon_path = os.path.join('static', 'favicon.ico')
+    if os.path.exists(icon_path):
+        params.append(f'--icon={icon_path}')
+
+    # Thêm tất cả file và thư mục
+    for dest, src in data_files:
+        params.append(f'--add-data={src}{separator}{dest}')
+
+    # Windows-specific imports
+    hidden_imports = [
         'flask',
         'flask_cors',
+        'flask_socketio',
         'selenium',
         'pyodbc',
         'socketio',
         'engineio',
         'eventlet',
-        'eventlet.hubs.epolls',
-        'eventlet.hubs.kqueue',
-        'eventlet.hubs.selects',
+        'dns',
+        'dns.resolver',
         'pdfminer',
         'google.oauth2',
         'googleapiclient',
         'openpyxl',
         'tenacity',
         'webdriver_manager',
-        'requests'
+        'requests',
+        'threading',
+        'win32com',  # Windows specific
+        'win32api',  # Windows specific
     ]
 
-def build_windows():
-    """Build package cho Windows"""
-    print("Đang build cho Windows...")
-    clean_build()
-
-    separator = ';'
-    current_dir = os.path.abspath(".")
-    app_name = "ImgExtraction-windows"
-
-    params = [
-        'app.py',
-        f'--name={app_name}',
-        '--onefile',  # Build thành 1 file exe duy nhất
-        '--noconsole',  # Không hiển thị console
-        '--clean',
-        '--noconfirm',
-    ]
-
-    # Thêm icon nếu có
-    icon_path = os.path.join(current_dir, 'static', 'favicon.ico')
-    if os.path.exists(icon_path):
-        params.append(f'--icon={icon_path}')
-
-    # Thêm các file bổ sung
-    for src, dst in get_additional_files():
-        src_path = os.path.join(current_dir, src)
-        if os.path.exists(src_path):
-            params.append(f'--add-data={src_path}{separator}{dst}')
-
-    # Thêm hidden imports
-    for imp in get_hidden_imports():
+    for imp in hidden_imports:
         params.append(f'--hidden-import={imp}')
 
-    # Thêm các options đặc biệt cho Windows
     params.extend([
         '--collect-submodules=selenium',
         '--collect-submodules=webdriver_manager',
@@ -125,43 +119,62 @@ def build_windows():
         '--collect-all=selenium'
     ])
 
-    PyInstaller.__main__.run(params)
-    print(f"Đã build xong file exe tại dist/{app_name}.exe")
+    return params, app_name
 
 def build_macos():
-    """Build package cho macOS"""
+    """Build ứng dụng cho macOS"""
     print("Đang build cho macOS...")
     clean_build()
 
-    separator = ':'
-    current_dir = os.path.abspath(".")
     app_name = "ImgExtraction"
+    separator = ':'
+    data_files = collect_all_files()
 
     params = [
         'app.py',
         f'--name={app_name}',
-        '--onefile',  # Build thành 1 file thực thi duy nhất
-        '--noconsole',  # Không hiển thị terminal
+        '--onefile',
+        '--noconsole',
         '--clean',
         '--noconfirm',
     ]
 
-    # Thêm icon nếu có
-    icon_path = os.path.join(current_dir, 'static', 'favicon.icns')
+    # Thêm icon cho macOS
+    icon_path = os.path.join('static', 'favicon.icns')
     if os.path.exists(icon_path):
         params.append(f'--icon={icon_path}')
 
-    # Thêm các file bổ sung
-    for src, dst in get_additional_files():
-        src_path = os.path.join(current_dir, src)
-        if os.path.exists(src_path):
-            params.append(f'--add-data={src_path}{separator}{dst}')
+    # Thêm tất cả file và thư mục
+    for dest, src in data_files:
+        params.append(f'--add-data={src}{separator}{dest}')
 
-    # Thêm hidden imports
-    for imp in get_hidden_imports():
+    # macOS-specific imports
+    hidden_imports = [
+        'flask',
+        'flask_cors',
+        'flask_socketio',
+        'selenium',
+        'pyodbc',
+        'socketio',
+        'engineio',
+        'eventlet',
+        'dns',
+        'dns.resolver',
+        'pdfminer',
+        'google.oauth2',
+        'googleapiclient',
+        'openpyxl',
+        'tenacity',
+        'webdriver_manager',
+        'requests',
+        'threading',
+        'AppKit',  # macOS specific
+        'Foundation',  # macOS specific
+    ]
+
+    for imp in hidden_imports:
         params.append(f'--hidden-import={imp}')
 
-    # Thêm các options đặc biệt cho macOS
     params.extend([
         '--collect-submodules=selenium',
         '--collect-submodules=webdriver_manager',
@@ -169,34 +182,79 @@ def build_macos():
         '--collect-all=selenium'
     ])
 
-    PyInstaller.__main__.run(params)
-    print(f"Đã build xong file thực thi tại dist/{app_name}")
+    return params, app_name
 
-def main():
-    """Hàm chính để chạy build"""
-    current_os = platform.system().lower()
+def build_app():
+    """Build ứng dụng dựa trên hệ điều hành"""
+    system = platform.system().lower()
 
-    if len(sys.argv) > 1:
-        target = sys.argv[1].lower()
-        if target == 'windows':
-            build_windows()
-        elif target == 'macos':
-            build_macos()
-        else:
-            print("Lỗi: Vui lòng chỉ định 'windows' hoặc 'macos'. Ví dụ: python build.py windows")
-            sys.exit(1)
+    if system == "windows":
+        params, app_name = build_windows()
+    elif system == "darwin":  # macOS
+        params, app_name = build_macos()
     else:
-        if 'windows' in current_os:
-            build_windows()
-        elif 'darwin' in current_os:
-            build_macos()
-        else:
-            print("Hệ điều hành không được hỗ trợ tự động. Vui lòng chỉ định 'windows' hoặc 'macos'.")
-            sys.exit(1)
+        print("Hệ điều hành không được hỗ trợ")
+        sys.exit(1)
+
+    try:
+        print("\nĐang tiến hành build...")
+        PyInstaller.__main__.run(params)
+        print(f"\nBuild thành công! File thực thi nằm tại: dist/{app_name}")
+
+        print("\nĐang copy các file và thư mục bổ sung...")
+        dist_dir = os.path.join('dist')
+        data_files = collect_all_files()
+
+        for dest, src in data_files:
+            dest_path = os.path.join(dist_dir, dest)
+            if os.path.isdir(src):
+                if os.path.exists(dest_path):
+                    shutil.rmtree(dest_path)
+                shutil.copytree(src, dest_path)
+            else:
+                shutil.copy2(src, dist_dir)
+
+        print("\nĐã copy xong các file bổ sung!")
+
+        # Tạo file README với hướng dẫn
+        readme_content = """
+Hướng dẫn sử dụng:
+
+1. Đảm bảo đã cài đặt Google Chrome
+2. Chạy file thực thi (ImgExtraction hoặc ImgExtraction-windows.exe)
+3. Trình duyệt sẽ tự động mở tại địa chỉ http://localhost:8080
+
+Lưu ý:
+- Không xóa bất kỳ thư mục nào trong package
+- Đảm bảo các thư mục cookies và downloads có quyền ghi
+- Nếu gặp lỗi, kiểm tra file .env và service-account-key.json
+        """
+
+        with open(os.path.join(dist_dir, 'README.txt'), 'w', encoding='utf-8') as f:
+            f.write(readme_content)
+
+        print(f"\nỨng dụng đã được build thành công tại thư mục 'dist'")
+
+    except Exception as e:
+        print(f"\nLỗi trong quá trình build: {str(e)}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     try:
-        main()
+        if len(sys.argv) > 1:
+            target_os = sys.argv[1].lower()
+            if target_os not in ['windows', 'macos']:
+                print("Sử dụng: python build.py [windows|macos]")
+                sys.exit(1)
+
+            if target_os == 'windows' and platform.system().lower() != 'windows':
+                print("Không thể build cho Windows trên hệ điều hành khác")
+                sys.exit(1)
+            elif target_os == 'macos' and platform.system().lower() != 'darwin':
+                print("Không thể build cho macOS trên hệ điều hành khác")
+                sys.exit(1)
+
+        build_app()
     except Exception as e:
-        print(f"Lỗi trong quá trình build: {str(e)}")
+        print(f"Lỗi: {str(e)}")
         sys.exit(1)

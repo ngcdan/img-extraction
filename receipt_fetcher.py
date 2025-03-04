@@ -14,6 +14,7 @@ import subprocess
 import time
 import os
 import base64
+import json
 from utils import send_notification, get_download_directory
 from extract_info import update_last_row_sheet
 
@@ -21,7 +22,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 import io
-from google_drive_utils import upload_file_to_drive
+from google_drive_utils import upload_file_to_drive, DriveService
 
 def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
@@ -86,21 +87,48 @@ def initialize_chrome():
         send_notification(error_message, "error")
         return None
 
-def process_download(driver, username, so_tk=None, download_status=None):
-    """Xử lý quá trình tải biên lai"""
+def save_cookies(driver, username):
+    """Lưu cookies cho username"""
     try:
-        # Lưu handle của tab hiện tại
-        current_handle = driver.current_window_handle
-        actions = ActionChains(driver)
+        cookies = driver.get_cookies()
+        if not os.path.exists('cookies'):
+            os.makedirs('cookies')
+        with open(f'cookies/{username}.cookies', 'w') as f:
+            json.dump(cookies, f)
+        return True
+    except Exception as e:
+        print(f"Lỗi khi lưu cookies: {e}")
+        return False
 
-        # Mở trang đăng nhập trong tab mới
-        driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
-        # Đăng nhập
-        if fill_login_info(driver, username, username):
-            send_notification("Đăng nhập thành công", "success")
-        else:
-            raise Exception("Không thể đăng nhập")
+def load_cookies(driver, username):
+    """Load cookies cho username"""
+    try:
+        if not os.path.exists(f'cookies/{username}.cookies'):
+            return False
+        with open(f'cookies/{username}.cookies', 'r') as f:
+            cookies = json.load(f)
+        # Truy cập trang trước khi add cookies
+        driver.get("http://thuphi.haiphong.gov.vn:8222")
+        for cookie in cookies:
+            driver.add_cookie(cookie)
+        return True
+    except Exception as e:
+        print(f"Lỗi khi load cookies: {e}")
+        return False
 
+def check_login_status(driver):
+    """Kiểm tra trạng thái đăng nhập"""
+    try:
+        driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
+        time.sleep(2)
+        # Kiểm tra URL sau khi chuyển hướng
+        return "dang-nhap" not in driver.current_url
+    except:
+        return False
+
+def collect_captcha_if_login(driver):
+    """Thu thập captcha nếu cần đăng nhập"""
+    try:
         # Thêm script theo dõi captcha
         js_script = """
         window.captchaValue = '';
@@ -139,40 +167,54 @@ def process_download(driver, username, so_tk=None, download_status=None):
                     if driver.current_url == "http://thuphi.haiphong.gov.vn:8222/Home":
                         login_success = True
                         break
-            except Exception as e:
+            except Exception:
                 continue
+            time.sleep(0.5)
 
-        if not login_success:
-            raise Exception("Đăng nhập không thành công sau 60 giây")
+        return login_success
+    except Exception as e:
+        print(f"Lỗi khi thu thập captcha: {e}")
+        return False
 
-        # Truy cập trực tiếp trang danh sách biên lai
+def process_download(driver, username, so_tk=None, download_status=None):
+    """Xử lý quá trình tải biên lai"""
+    try:
+        # Mở tab mới
+        driver.execute_script("window.open('');")
+        # Chuyển đến tab mới (tab cuối cùng trong danh sách)
+        driver.switch_to.window(driver.window_handles[-1])
+
+        # Thử dùng cookies đã lưu
+        cookies_loaded = load_cookies(driver, username)
+        if cookies_loaded:
+            # Kiểm tra trạng thái đăng nhập
+            if check_login_status(driver):
+                send_notification("Đã đăng nhập lại bằng cookies", "success")
+            else:
+                # Nếu cookies không còn hiệu lực, đăng nhập lại
+                driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
+                if not fill_login_info(driver, username, username):
+                    raise Exception("Không thể đăng nhập")
+                if not collect_captcha_if_login(driver):
+                    raise Exception("Đăng nhập không thành công sau 60 giây")
+                save_cookies(driver, username)
+        else:
+            # Đăng nhập thông thường nếu không có cookies
+            driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
+            if fill_login_info(driver, username, username):
+                if not collect_captcha_if_login(driver):
+                    raise Exception("Đăng nhập không thành công sau 60 giây")
+                send_notification("Đăng nhập thành công", "success")
+                save_cookies(driver, username)
+            else:
+                raise Exception("Không thể đăng nhập")
+
+        # Truy cập trang danh sách biên lai
         wait = WebDriverWait(driver, 20)
-        bien_lai_url = "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu"
-        driver.get(bien_lai_url)
+        driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
         send_notification("Đang chuyển đến trang danh sách biên lai...", "info")
 
-        # Nếu có số tờ khai, thực hiện tìm kiếm
-        if so_tk:
-            try:
-                time.sleep(3)  # Đợi trang load xong
-                so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
-                so_tk_input.clear()
-                so_tk_input.send_keys(so_tk)
-                send_notification(f"Đã điền số tờ khai: {so_tk}")
-
-                search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                # Hover và click vào nút tìm kiếm
-                actions.move_to_element(search_button).perform()
-                time.sleep(1)
-                actions.click().perform()
-                send_notification("Đã nhấp nút tìm kiếm")
-
-                time.sleep(3)  # Đợi kết quả tìm kiếm
-            except Exception as e:
-                send_notification(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}", "error")
-                raise
-
-        # Tìm các link biên lai
+        # Đợi và tìm các link biên lai
         links = wait.until(EC.presence_of_all_elements_located((
             By.CSS_SELECTOR,
             "a.color-blue.underline[href^='http://113.160.97.58:8224/Viewer/HoaDonViewer.aspx?mhd='][href$='iscd=1']"
@@ -183,8 +225,6 @@ def process_download(driver, username, so_tk=None, download_status=None):
             return False
 
         total_links = len(links)
-        send_notification(f"Tìm thấy {total_links} biên lai", "info")
-
         if download_status:
             download_status['total'] = total_links
 
@@ -202,7 +242,7 @@ def process_download(driver, username, so_tk=None, download_status=None):
                     if download_status:
                         download_status['failed'] += 1
                     send_notification(f"Tải thất bại biên lai {i}/{total_links}", "error")
-                time.sleep(1)
+                # time.sleep(1)
 
         if download_status:
             download_status['status'] = 'completed'
@@ -232,6 +272,7 @@ def process_download(driver, username, so_tk=None, download_status=None):
             driver.switch_to.window(localhost_handle)
             send_notification("Đã trở về trang chủ", "info")
         return True
+
     except Exception as e:
         error_msg = f"Lỗi: {str(e)}"
         print(error_msg)
@@ -409,7 +450,35 @@ def download_pdf(driver, link_element):
         ngay_formatted = ngay.replace('/', '')
         filename = f"CSHT_{invoice_no}.pdf"
 
-        # Tải PDF
+        # Kiểm tra file đã tồn tại trong Drive chưa
+        drive_instance = DriveService.get_instance()
+        service = drive_instance.service
+        root_folder_id = drive_instance.root_folder_id
+
+        # Tìm folder ngày
+        date_query = f"name = '{ngay_formatted}' and mimeType = 'application/vnd.google-apps.folder' and '{root_folder_id}' in parents"
+        date_results = service.files().list(q=date_query, spaces='drive', fields='files(id)').execute()
+
+        if date_results.get('files'):
+            date_folder_id = date_results['files'][0]['id']
+
+            # Tìm folder số tờ khai trong folder ngày
+            custom_query = f"name = '{custom_no}' and mimeType = 'application/vnd.google-apps.folder' and '{date_folder_id}' in parents"
+            custom_results = service.files().list(q=custom_query, spaces='drive', fields='files(id)').execute()
+
+            if custom_results.get('files'):
+                custom_folder_id = custom_results['files'][0]['id']
+
+                # Tìm file trong folder số tờ khai
+                file_query = f"name = '{filename}' and mimeType = 'application/pdf' and '{custom_folder_id}' in parents"
+                file_results = service.files().list(q=file_query, spaces='drive', fields='files(id)').execute()
+
+                if file_results.get('files'):
+                    print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}/{custom_no}")
+                    send_notification(f"File {filename} đã tồn tại trong Drive", "info")
+                    return True
+
+        # Nếu file chưa tồn tại, tiếp tục tải
         driver.execute_script(f"window.open('{href}', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
         wait = WebDriverWait(driver, 5)

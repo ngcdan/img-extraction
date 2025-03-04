@@ -100,62 +100,71 @@ def process_file_content(file):
                 items = extract_items(sections['table'])
                 extracted_info['line_items'] = items
 
+                # Comment tạm thời logic query customs info
                 customs_number = extracted_info['customs_number']
                 if customs_number:
-                    # Tạo queue để nhận kết quả
-                    result_queue = Queue()
+                    # Set empty cho các thuộc tính
+                    extracted_info.update({
+                        'jobId': '',
+                        'hawb': '',
+                        'nguoi_khai': ''
+                    })
 
-                    # Khởi tạo và start thread
-                    query_thread = Thread(
-                        target=async_query_customs_info,
-                        args=(customs_number, result_queue)
-                    )
-                    query_thread.start()
+                    # # Tạm comment logic query
+                    # # Tạo queue để nhận kết quả
+                    # result_queue = Queue()
 
-                    # Đợi kết quả tối đa 10 giây
-                    query_thread.join(timeout=10)
+                    # # Khởi tạo và start thread
+                    # query_thread = Thread(
+                    #     target=async_query_customs_info,
+                    #     args=(customs_number, result_queue)
+                    # )
+                    # query_thread.start()
 
-                    if not result_queue.empty():
-                        result = result_queue.get()
-                        if result.get('success'):
-                            extracted_info.update({
-                                'jobId': result['jobId'],
-                                'hawb': result['hawb'],
-                                'nguoi_khai': result['nguoi_khai']
-                            })
-                            send_notification(
-                                f"Đã tìm thấy thông tin tờ khai: {customs_number}\n"
-                                f"Job ID: {result['jobId']}\n"
-                                f"HAWB: {result['hawb']}\n"
-                                f"Người khai: {result['nguoi_khai']}",
-                                "success"
-                            )
-                        else:
-                            extracted_info.update({
-                                'jobId': '',
-                                'hawb': '',
-                                'nguoi_khai': ''
-                            })
-                            if 'error' in result:
-                                send_notification(
-                                    f"Lỗi khi truy vấn thông tin tờ khai {customs_number}: {result['error']}",
-                                    "error"
-                                )
-                            else:
-                                send_notification(
-                                    f"Không tìm thấy thông tin tờ khai: {customs_number}",
-                                    "warning"
-                                )
-                    else:
-                        extracted_info.update({
-                            'jobId': '',
-                            'hawb': '',
-                            'nguoi_khai': ''
-                        })
-                        send_notification(
-                            f"Timeout khi truy vấn thông tin tờ khai: {customs_number}",
-                            "error"
-                        )
+                    # # Đợi kết quả tối đa 10 giây
+                    # query_thread.join(timeout=10)
+
+                    # if not result_queue.empty():
+                    #     result = result_queue.get()
+                    #     if result.get('success'):
+                    #         extracted_info.update({
+                    #             'jobId': result['jobId'],
+                    #             'hawb': result['hawb'],
+                    #             'nguoi_khai': result['nguoi_khai']
+                    #         })
+                    #         send_notification(
+                    #             f"Đã tìm thấy thông tin tờ khai: {customs_number}\n"
+                    #             f"Job ID: {result['jobId']}\n"
+                    #             f"HAWB: {result['hawb']}\n"
+                    #             f"Người khai: {result['nguoi_khai']}",
+                    #             "success"
+                    #         )
+                    #     else:
+                    #         extracted_info.update({
+                    #             'jobId': '',
+                    #             'hawb': '',
+                    #             'nguoi_khai': ''
+                    #         })
+                    #         if 'error' in result:
+                    #             send_notification(
+                    #                 f"Lỗi khi truy vấn thông tin tờ khai {customs_number}: {result['error']}",
+                    #                 "error"
+                    #             )
+                    #         else:
+                    #             send_notification(
+                    #                 f"Không tìm thấy thông tin tờ khai: {customs_number}",
+                    #                 "warning"
+                    #             )
+                    # else:
+                    #     extracted_info.update({
+                    #         'jobId': '',
+                    #         'hawb': '',
+                    #         'nguoi_khai': ''
+                    #     })
+                    #     send_notification(
+                    #         f"Timeout khi truy vấn thông tin tờ khai: {customs_number}",
+                    #         "error"
+                    #     )
 
                 # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
                 ngay_formatted = extracted_info['date'].replace('/', '')

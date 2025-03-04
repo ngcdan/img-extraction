@@ -58,7 +58,6 @@ def start_download():
             if not driver:
                 send_notification("Không thể khởi tạo Chrome", "error")
                 return jsonify({'error': 'Không thể khởi tạo Chrome'})
-            time.sleep(2)  # Đợi driver khởi động hoàn toàn
 
         # Reset trạng thái download
         download_status = {

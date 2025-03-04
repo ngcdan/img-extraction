@@ -107,3 +107,8 @@ captcha_102.png	JDABW
 captcha_103.png	HDSIA
 captcha_104.png	BVZJC
 captcha_105.png	PNRYI
+captcha_106.png	PCZLM
+captcha_107.png	RSFUP
+captcha_108.png	YMyer
+captcha_109.png	VEWLH
+captcha_110.png	LTGWB

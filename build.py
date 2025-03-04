@@ -18,13 +18,37 @@ def clean_build():
 
     for dir_name in dirs_to_clean:
         if os.path.exists(dir_name):
-            shutil.rmtree(dir_name)
-            print(f"Đã xóa thư mục: {dir_name}")
+            try:
+                # Thử xóa từng file trong thư mục trước
+                for root, dirs, files in os.walk(dir_name, topdown=False):
+                    for name in files:
+                        try:
+                            os.remove(os.path.join(root, name))
+                        except Exception as e:
+                            print(f"Không thể xóa file {name}: {e}")
+                    for name in dirs:
+                        try:
+                            os.rmdir(os.path.join(root, name))
+                        except Exception as e:
+                            print(f"Không thể xóa thư mục {name}: {e}")
+
+                # Sau đó xóa thư mục gốc
+                os.rmdir(dir_name)
+                print(f"Đã xóa thư mục: {dir_name}")
+            except Exception as e:
+                print(f"Cảnh báo: Không thể xóa hoàn toàn thư mục {dir_name}: {e}")
+                # Tiếp tục build ngay cả khi không xóa được hoàn toàn
 
     for file_pattern in files_to_clean:
-        for file_path in glob.glob(file_pattern):
-            os.remove(file_path)
-            print(f"Đã xóa file: {file_path}")
+        try:
+            for file_path in glob.glob(file_pattern):
+                try:
+                    os.remove(file_path)
+                    print(f"Đã xóa file: {file_path}")
+                except Exception as e:
+                    print(f"Không thể xóa file {file_path}: {e}")
+        except Exception as e:
+            print(f"Lỗi khi tìm file {file_pattern}: {e}")
 
 def get_additional_files():
     """Danh sách các file và thư mục cần thêm vào package"""
@@ -72,20 +96,22 @@ def build_windows():
     params = [
         'app.py',
         f'--name={app_name}',
-        '--onefile',
-        '--windowed',
+        '--onefile',  # Build thành 1 file exe duy nhất
+        '--noconsole',  # Không hiển thị console
         '--clean',
         '--noconfirm',
-        '--icon=static/favicon.ico',  # Thêm icon cho ứng dụng
     ]
+
+    # Thêm icon nếu có
+    icon_path = os.path.join(current_dir, 'static', 'favicon.ico')
+    if os.path.exists(icon_path):
+        params.append(f'--icon={icon_path}')
 
     # Thêm các file bổ sung
     for src, dst in get_additional_files():
         src_path = os.path.join(current_dir, src)
         if os.path.exists(src_path):
             params.append(f'--add-data={src_path}{separator}{dst}')
-        else:
-            print(f"Cảnh báo: Không tìm thấy {src_path}, bỏ qua...")
 
     # Thêm hidden imports
     for imp in get_hidden_imports():
@@ -93,13 +119,14 @@ def build_windows():
 
     # Thêm các options đặc biệt cho Windows
     params.extend([
-        '--add-binary=chromedriver.exe;.',  # Nếu có ChromeDriver
         '--collect-submodules=selenium',
-        '--collect-submodules=webdriver_manager'
+        '--collect-submodules=webdriver_manager',
+        '--collect-all=webdriver_manager',
+        '--collect-all=selenium'
     ])
 
     PyInstaller.__main__.run(params)
-    print(f"Đã build xong package Windows tại dist/{app_name}.exe")
+    print(f"Đã build xong file exe tại dist/{app_name}.exe")
 
 def build_macos():
     """Build package cho macOS"""
@@ -109,32 +136,26 @@ def build_macos():
     separator = ':'
     current_dir = os.path.abspath(".")
     app_name = "ImgExtraction"
-    bundle_identifier = "com.augmentcode.imgextraction"
-
-    # Kiểm tra icon file
-    icon_path = os.path.join(current_dir, 'static', 'favicon.icns')
-    icon_param = []
-    if os.path.exists(icon_path):
-        icon_param = ['--icon=' + icon_path]
-    else:
-        print("Cảnh báo: Không tìm thấy file icon (.icns), sẽ build không có icon")
 
     params = [
         'app.py',
         f'--name={app_name}',
-        '--onedir',
-        '--windowed',
+        '--onefile',  # Build thành 1 file thực thi duy nhất
+        '--noconsole',  # Không hiển thị terminal
         '--clean',
         '--noconfirm',
-    ] + icon_param
+    ]
+
+    # Thêm icon nếu có
+    icon_path = os.path.join(current_dir, 'static', 'favicon.icns')
+    if os.path.exists(icon_path):
+        params.append(f'--icon={icon_path}')
 
     # Thêm các file bổ sung
     for src, dst in get_additional_files():
         src_path = os.path.join(current_dir, src)
         if os.path.exists(src_path):
             params.append(f'--add-data={src_path}{separator}{dst}')
-        else:
-            print(f"Cảnh báo: Không tìm thấy {src_path}, bỏ qua...")
 
     # Thêm hidden imports
     for imp in get_hidden_imports():
@@ -148,75 +169,8 @@ def build_macos():
         '--collect-all=selenium'
     ])
 
-    try:
-        PyInstaller.__main__.run(params)
-
-        # Tạo cấu trúc .app
-        app_dir = os.path.join('dist', f"{app_name}.app")
-        contents_dir = os.path.join(app_dir, 'Contents')
-        macos_dir = os.path.join(contents_dir, 'MacOS')
-        resources_dir = os.path.join(contents_dir, 'Resources')
-        frameworks_dir = os.path.join(contents_dir, 'Frameworks')
-
-        # Tạo các thư mục cần thiết
-        for directory in [contents_dir, macos_dir, resources_dir, frameworks_dir]:
-            os.makedirs(directory, exist_ok=True)
-
-        # Di chuyển nội dung
-        src_dir = os.path.join('dist', app_name)
-        if os.path.exists(src_dir):
-            for item in os.listdir(src_dir):
-                src_item = os.path.join(src_dir, item)
-                dst_item = os.path.join(macos_dir, item)
-                try:
-                    if os.path.exists(dst_item):
-                        if os.path.isdir(dst_item):
-                            shutil.rmtree(dst_item)
-                        else:
-                            os.remove(dst_item)
-                    shutil.move(src_item, dst_item)
-                except Exception as e:
-                    print(f"Cảnh báo: Không thể di chuyển {item}: {e}")
-
-            # Xóa thư mục cũ
-            shutil.rmtree(src_dir)
-
-        # Tạo Info.plist với thêm quyền
-        plist_data = {
-            'CFBundleName': app_name,
-            'CFBundleDisplayName': 'Image Extraction',
-            'CFBundleIdentifier': bundle_identifier,
-            'CFBundleExecutable': app_name,
-            'CFBundlePackageType': 'APPL',
-            'CFBundleShortVersionString': '1.0.0',
-            'CFBundleVersion': '1.0.0',
-            'LSMinimumSystemVersion': '10.13',
-            'NSHighResolutionCapable': True,
-            'NSAppTransportSecurity': {
-                'NSAllowsArbitraryLoads': True
-            },
-            'NSPrincipalClass': 'NSApplication',
-            'LSApplicationCategoryType': 'public.app-category.utilities',
-            # Thêm quyền cần thiết
-            'NSAppleEventsUsageDescription': 'App needs to automate browser',
-            'NSCameraUsageDescription': 'App needs to access camera',
-            'NSMicrophoneUsageDescription': 'App needs to access microphone',
-        }
-
-        plist_file = os.path.join(contents_dir, 'Info.plist')
-        with open(plist_file, 'wb') as f:
-            plistlib.dump(plist_data, f)
-
-        # Đặt quyền thực thi
-        executable_path = os.path.join(macos_dir, app_name)
-        if os.path.exists(executable_path):
-            os.chmod(executable_path, 0o755)
-
-        print(f"Đã build xong package macOS tại dist/{app_name}.app")
-
-    except Exception as e:
-        print(f"Lỗi trong quá trình build macOS: {str(e)}")
-        raise
+    PyInstaller.__main__.run(params)
+    print(f"Đã build xong file thực thi tại dist/{app_name}")
 
 def main():
     """Hàm chính để chạy build"""

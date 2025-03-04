@@ -7,7 +7,7 @@ import glob
 import plistlib
 
 def resource_path(relative_path):
-    """Lấy đường dẫn tuyệt đối đến tài nguyên, hoạt động cho cả dev và PyInstaller"""
+    """Lấy đường dẫn tuyệt đối đến tài nguyên"""
     base_path = getattr(sys, '_MEIPASS', os.path.abspath("."))
     return os.path.join(base_path, relative_path)
 
@@ -33,8 +33,32 @@ def get_additional_files():
         ('static', 'static'),
         ('.env', '.'),
         ('service-account-key.json', '.'),
+        ('cookies', 'cookies'),  # Thêm thư mục cookies
+        ('downloads', 'downloads'),  # Thêm thư mục downloads
     ]
     return additional_files
+
+def get_hidden_imports():
+    """Danh sách các module cần import"""
+    return [
+        'flask',
+        'flask_cors',
+        'selenium',
+        'pyodbc',
+        'socketio',
+        'engineio',
+        'eventlet',
+        'eventlet.hubs.epolls',
+        'eventlet.hubs.kqueue',
+        'eventlet.hubs.selects',
+        'pdfminer',
+        'google.oauth2',
+        'googleapiclient',
+        'openpyxl',
+        'tenacity',
+        'webdriver_manager',
+        'requests'
+    ]
 
 def build_windows():
     """Build package cho Windows"""
@@ -52,47 +76,7 @@ def build_windows():
         '--windowed',
         '--clean',
         '--noconfirm',
-    ]
-
-    for src, dst in get_additional_files():
-        src_path = os.path.join(current_dir, src)
-        if os.path.exists(src_path):
-            params.append(f'--add-data={src_path}{separator}{dst}')
-        else:
-            print(f"Cảnh báo: Không tìm thấy {src_path}, bỏ qua...")
-
-    hidden_imports = [
-        'pyodbc',
-        'socketio',
-        'engineio',
-        'eventlet',
-        'eventlet.hubs.epolls',
-        'eventlet.hubs.kqueue',
-        'eventlet.hubs.selects',
-    ]
-    for imp in hidden_imports:
-        params.append(f'--hidden-import={imp}')
-
-    PyInstaller.__main__.run(params)
-    print(f"Đã build xong package Windows tại dist/{app_name}.exe")
-
-def build_macos():
-    """Build package cho macOS thành file .app"""
-    print("Đang build cho macOS...")
-    clean_build()
-
-    separator = ':'
-    current_dir = os.path.abspath(".")
-    app_name = "ImgExtraction"
-    bundle_identifier = "com.yourcompany.imgextraction"  # Thay đổi nếu cần
-
-    # Build với --onedir để tạo thư mục chứa ứng dụng
-    params = [
-        'app.py',
-        f'--name={app_name}',
-        '--onedir',  # Tạo thư mục thay vì file đơn
-        '--clean',
-        '--noconfirm',
+        '--icon=static/favicon.ico',  # Thêm icon cho ứng dụng
     ]
 
     # Thêm các file bổ sung
@@ -104,19 +88,57 @@ def build_macos():
             print(f"Cảnh báo: Không tìm thấy {src_path}, bỏ qua...")
 
     # Thêm hidden imports
-    hidden_imports = [
-        'pyodbc',
-        'socketio',
-        'engineio',
-        'eventlet',
-        'eventlet.hubs.epolls',
-        'eventlet.hubs.kqueue',
-        'eventlet.hubs.selects',
-    ]
-    for imp in hidden_imports:
+    for imp in get_hidden_imports():
         params.append(f'--hidden-import={imp}')
 
-    # Chạy PyInstaller để tạo thư mục
+    # Thêm các options đặc biệt cho Windows
+    params.extend([
+        '--add-binary=chromedriver.exe;.',  # Nếu có ChromeDriver
+        '--collect-submodules=selenium',
+        '--collect-submodules=webdriver_manager'
+    ])
+
+    PyInstaller.__main__.run(params)
+    print(f"Đã build xong package Windows tại dist/{app_name}.exe")
+
+def build_macos():
+    """Build package cho macOS"""
+    print("Đang build cho macOS...")
+    clean_build()
+
+    separator = ':'
+    current_dir = os.path.abspath(".")
+    app_name = "ImgExtraction"
+    bundle_identifier = "com.augmentcode.imgextraction"
+
+    params = [
+        'app.py',
+        f'--name={app_name}',
+        '--onedir',
+        '--windowed',
+        '--clean',
+        '--noconfirm',
+        '--icon=static/favicon.icns',  # Icon cho macOS (cần convert từ .ico sang .icns)
+    ]
+
+    # Thêm các file bổ sung
+    for src, dst in get_additional_files():
+        src_path = os.path.join(current_dir, src)
+        if os.path.exists(src_path):
+            params.append(f'--add-data={src_path}{separator}{dst}')
+        else:
+            print(f"Cảnh báo: Không tìm thấy {src_path}, bỏ qua...")
+
+    # Thêm hidden imports
+    for imp in get_hidden_imports():
+        params.append(f'--hidden-import={imp}')
+
+    # Thêm các options đặc biệt cho macOS
+    params.extend([
+        '--collect-submodules=selenium',
+        '--collect-submodules=webdriver_manager'
+    ])
+
     PyInstaller.__main__.run(params)
 
     # Tạo cấu trúc .app
@@ -129,33 +151,38 @@ def build_macos():
     for directory in [contents_dir, macos_dir, resources_dir]:
         os.makedirs(directory, exist_ok=True)
 
-    # Di chuyển nội dung từ dist/ImgExtraction sang Contents/MacOS
+    # Di chuyển nội dung
     src_dir = os.path.join('dist', app_name)
     for item in os.listdir(src_dir):
         shutil.move(os.path.join(src_dir, item), macos_dir)
 
-    # Xóa thư mục dist/ImgExtraction cũ
+    # Xóa thư mục cũ
     shutil.rmtree(src_dir)
 
-    # Tạo file Info.plist
+    # Tạo Info.plist
     plist_data = {
         'CFBundleName': app_name,
+        'CFBundleDisplayName': 'Image Extraction',
         'CFBundleIdentifier': bundle_identifier,
         'CFBundleExecutable': app_name,
         'CFBundlePackageType': 'APPL',
         'CFBundleShortVersionString': '1.0.0',
         'CFBundleVersion': '1.0.0',
-        'LSMinimumSystemVersion': '10.13',  # Phiên bản macOS tối thiểu
+        'LSMinimumSystemVersion': '10.13',
+        'NSHighResolutionCapable': True,
+        'NSAppTransportSecurity': {
+            'NSAllowsArbitraryLoads': True
+        }
     }
+
     plist_file = os.path.join(contents_dir, 'Info.plist')
     with open(plist_file, 'wb') as f:
         plistlib.dump(plist_data, f)
 
-    # Đặt quyền thực thi cho file thực thi
+    # Đặt quyền thực thi
     executable_path = os.path.join(macos_dir, app_name)
     if os.path.exists(executable_path):
         os.chmod(executable_path, 0o755)
-        print(f"Đã cập nhật quyền thực thi cho {executable_path}")
 
     print(f"Đã build xong package macOS tại dist/{app_name}.app")
 

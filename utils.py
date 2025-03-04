@@ -8,17 +8,11 @@ socketio = None
 def init_socketio(app):
     global socketio
 
-    # Xác định async_mode dựa trên môi trường
+    # Luôn sử dụng threading mode khi đã build
     if getattr(sys, 'frozen', False):
-        # Đang chạy từ file đã build (PyInstaller)
         async_mode = 'threading'
     else:
-        # Đang chạy từ source code
-        try:
-            import eventlet
-            async_mode = 'eventlet'
-        except ImportError:
-            async_mode = 'threading'
+        async_mode = None  # Để Flask-SocketIO tự chọn mode tốt nhất
 
     print(f"Initializing SocketIO with async_mode: {async_mode}")
 
@@ -27,7 +21,12 @@ def init_socketio(app):
         cors_allowed_origins="*",
         async_mode=async_mode,
         logger=True,
-        engineio_logger=True
+        engineio_logger=True,
+        ping_timeout=60,
+        ping_interval=25,
+        max_http_buffer_size=1e8,
+        manage_session=False,
+        websocket=False  # Disable WebSocket khi build
     )
     return socketio
 

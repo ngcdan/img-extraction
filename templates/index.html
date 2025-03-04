@@ -93,23 +93,26 @@
 
     <script>
 
-        // Kết nối Socket.IO với các options
+        // Khởi tạo Socket.IO với long-polling
         const socket = io({
-            transports: ['websocket'],
-            cors: {
-                origin: "*",
-                methods: ["GET", "POST"]
-            }
+            transports: ['polling'],
+            upgrade: false,
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            reconnectionAttempts: Infinity
         });
 
-        // Xử lý sự kiện kết nối
-        socket.on('connect', function() {
+        socket.on('connect', () => {
             console.log('Connected to server');
         });
 
-        socket.on('connect_error', (error) => {
-            console.log('Connection error:', error);
-            showToast('Lỗi kết nối đến server', 'error');
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+        });
+
+        socket.on('notification', (data) => {
+            showNotification(data.message, data.type);
         });
 
         // Hàm tạo và hiển thị toast

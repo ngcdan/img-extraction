@@ -6,11 +6,13 @@ import os
 import io
 from datetime import datetime
 from utils import init_socketio, send_notification
-from receipt_fetcher import ( initialize_chrome, process_download)
+from receipt_fetcher import (initialize_chrome, process_download)
 from extract_info import process_file_content
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
+
+# Không cần monkey patch khi sử dụng threading mode
 socketio = init_socketio(app)
 
 # Global variables
@@ -191,12 +193,13 @@ if __name__ == '__main__':
         # Mở trình duyệt sau 2 giây
         threading.Timer(2.0, open_browser).start()
 
-        # Chạy Flask app với port 8080
+        # Chạy Flask app với threading
         socketio.run(app,
             host='0.0.0.0',
-            port=8080,  # Đổi port ở đây
+            port=8080,
             debug=False,
-            allow_unsafe_werkzeug=True
+            allow_unsafe_werkzeug=True,
+            use_reloader=False  # Disable reloader khi build
         )
 
     except Exception as e:

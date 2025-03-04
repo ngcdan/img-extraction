@@ -1,22 +1,34 @@
 from flask_socketio import SocketIO, emit
 import json
+import os
+import sys
 
 socketio = None
 
 def init_socketio(app):
     global socketio
-    # Thử dùng eventlet, nếu không được thì fallback về threading
-    try:
-        import eventlet
-        async_mode = 'eventlet'
-    except ImportError:
-        async_mode = 'threading'  # Fallback an toàn cho PyInstaller
-    socketio = SocketIO(app,
-                       cors_allowed_origins="*",
-                       async_mode=async_mode,
-                       logger=True,
-                       engineio_logger=True)
-    print(f"SocketIO initialized with async_mode: {async_mode}")
+
+    # Xác định async_mode dựa trên môi trường
+    if getattr(sys, 'frozen', False):
+        # Đang chạy từ file đã build (PyInstaller)
+        async_mode = 'threading'
+    else:
+        # Đang chạy từ source code
+        try:
+            import eventlet
+            async_mode = 'eventlet'
+        except ImportError:
+            async_mode = 'threading'
+
+    print(f"Initializing SocketIO with async_mode: {async_mode}")
+
+    socketio = SocketIO(
+        app,
+        cors_allowed_origins="*",
+        async_mode=async_mode,
+        logger=True,
+        engineio_logger=True
+    )
     return socketio
 
 def send_notification(message, type="info"):

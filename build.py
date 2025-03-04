@@ -109,6 +109,22 @@ def build_windows():
         'win32api',  # Windows specific
     ]
 
+    hidden_imports.extend([
+        'engineio.async_drivers.threading',
+        'engineio.async_drivers.eventlet',
+        'dns.resolver',
+        'dns.exception',
+        'dns.rdatatype',
+        'dns.name',
+        'dns.message',
+        'dns.query',
+        'dns.rdata',
+        'dns.rdataclass',
+        'dns.rdtypes.*',
+        'dns.rdtypes.ANY.*',
+        'dns.rdtypes.IN.*'
+    ])
+
     for imp in hidden_imports:
         params.append(f'--hidden-import={imp}')
 
@@ -116,7 +132,14 @@ def build_windows():
         '--collect-submodules=selenium',
         '--collect-submodules=webdriver_manager',
         '--collect-all=webdriver_manager',
-        '--collect-all=selenium'
+        '--collect-all=selenium',
+        '--hidden-import=engineio.async_drivers.threading',
+        '--hidden-import=engineio.async_drivers.eventlet',
+        '--hidden-import=dns',
+        '--hidden-import=dns.resolver',
+        '--collect-all=dns',
+        '--collect-all=engineio',
+        '--collect-all=socketio'
     ])
 
     return params, app_name
@@ -172,6 +195,22 @@ def build_macos():
         'Foundation',  # macOS specific
     ]
 
+    hidden_imports.extend([
+        'engineio.async_drivers.threading',
+        'engineio.async_drivers.eventlet',
+        'dns.resolver',
+        'dns.exception',
+        'dns.rdatatype',
+        'dns.name',
+        'dns.message',
+        'dns.query',
+        'dns.rdata',
+        'dns.rdataclass',
+        'dns.rdtypes.*',
+        'dns.rdtypes.ANY.*',
+        'dns.rdtypes.IN.*'
+    ])
+
     for imp in hidden_imports:
         params.append(f'--hidden-import={imp}')
 
@@ -179,7 +218,14 @@ def build_macos():
         '--collect-submodules=selenium',
         '--collect-submodules=webdriver_manager',
         '--collect-all=webdriver_manager',
-        '--collect-all=selenium'
+        '--collect-all=selenium',
+        '--hidden-import=engineio.async_drivers.threading',
+        '--hidden-import=engineio.async_drivers.eventlet',
+        '--hidden-import=dns',
+        '--hidden-import=dns.resolver',
+        '--collect-all=dns',
+        '--collect-all=engineio',
+        '--collect-all=socketio'
     ])
 
     return params, app_name

@@ -16,117 +16,8 @@ from time import sleep
 from tenacity import retry, stop_after_attempt, wait_exponential
 from threading import Thread
 from queue import Queue
-
-def append_to_google_sheet(extracted_info):
-    """Thêm thông tin vào Google Sheet với retry logic"""
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        retry=lambda e: isinstance(e, HttpError) and e.resp.status_code in [500, 503]
-    )
-    def execute_append(sheet, values, spreadsheet_id, range_name):
-        body = {'values': values}
-        return sheet.values().append(
-            spreadsheetId=spreadsheet_id,
-            range=range_name,
-            valueInputOption='USER_ENTERED',
-            body=body
-        ).execute()
-
-    try:
-        # Cấu hình credentials
-        SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-        SERVICE_ACCOUNT_FILE = './service-account-key.json'
-        SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
-        RANGE_NAME = 'main!A:V'
-
-        # Kiểm tra file credentials tồn tại
-        if not os.path.exists(SERVICE_ACCOUNT_FILE):
-            send_notification("File service account không tồn tại", "error")
-            return False
-
-        # Khởi tạo credentials
-        try:
-            creds = service_account.Credentials.from_service_account_file(
-                SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-        except Exception as e:
-            send_notification(f"Lỗi khởi tạo credentials: {str(e)}", "error")
-            return False
-
-        # Khởi tạo service
-        try:
-            service = build('sheets', 'v4', credentials=creds)
-            sheet = service.spreadsheets()
-        except Exception as e:
-            send_notification(f"Lỗi khởi tạo Google Sheets service: {str(e)}", "error")
-            return False
-
-        # Validate input data
-        line_items = extracted_info.get('line_items', []);
-        if not line_items:
-            send_notification("Không có thông tin container để thêm vào Sheet", "warning")
-            return False
-
-        # Lấy số dòng hiện tại với retry
-        try:
-            result = sheet.values().get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=RANGE_NAME
-            ).execute()
-            current_row = len(result.get('values', []))
-        except HttpError as e:
-            send_notification(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}", "error")
-            return False
-
-        # Chuẩn bị dữ liệu
-        values = []
-        for line in line_items:
-            fixed_data = {
-                'service_code': 'CL014920',
-                'vendor': 'VETC',
-                'charge_code': 'B_EWF',
-                'description': 'EXPRESS WAY FEES',
-                'unit': 'shipment'
-            }
-
-            row_data = [
-                current_row,  # STT
-                extracted_info.get('so_ct', ''),  # Số chứng từ
-                fixed_data['service_code'],
-                fixed_data['vendor'],
-                extracted_info.get('jobId', ''),
-                extracted_info.get('hawb', ''),
-                extracted_info.get('customs_number', ''),
-                fixed_data['charge_code'],
-                fixed_data['description'],
-                line.get('quantity', ''),
-                fixed_data['unit'],
-                line.get('unit_price', ''),
-                '',  # Cột 12 để trống
-                line.get('amount', ''),
-                '', '', '', '',
-                extracted_info.get('tax_number'),
-                extracted_info.get('partner_invoice_name'),
-                '',  # Cột 20 để trống (Notes)
-                line.get('container_no', ''),
-                line.get('label', '')
-            ]
-            values.append(row_data)
-            current_row += 1
-
-        # Thực hiện append với retry
-        try:
-            execute_append(sheet, values, SPREADSHEET_ID, RANGE_NAME)
-            send_notification(f"Đã thêm {len(line_items)} dòng vào Google Sheet", "success")
-            return True
-        except Exception as e:
-            send_notification(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}", "error")
-            return False
-
-    except Exception as e:
-        send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
-        return False
+from google_drive_utils import upload_file_to_drive
+from google_sheet_utils import append_to_google_sheet, update_last_row_sheet
 
 def extract_text_from_pdf(pdf_path):
     """Trích xuất văn bản từ file PDF."""
@@ -269,28 +160,16 @@ def process_file_content(file):
                 # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
                 ngay_formatted = extracted_info['date'].replace('/', '')
 
-                # Tạo cấu trúc thư mục
-                base_dir = get_download_directory()
-                date_dir = os.path.join(base_dir, ngay_formatted)
-                so_tk_dir = os.path.join(date_dir, extracted_info['customs_number'])
-                # Tạo các thư mục nếu chưa tồn tại
-                for directory in [base_dir, date_dir, so_tk_dir]:
-                    if not os.path.exists(directory):
-                        os.makedirs(directory)
+                # Upload file lên Drive với cấu trúc thư mục
+                upload_result = upload_file_to_drive(
+                    file_content=file_content,
+                    filename=file.filename,
+                    parent_folder_date=ngay_formatted,
+                    custom_no=extracted_info['customs_number']
+                )
 
-                # Xử lý tên file và đường dẫn
-                full_path = os.path.join(so_tk_dir, file.filename)
-                if os.path.exists(full_path):
-                    base_name, ext = os.path.splitext(file.filename)
-                    counter = 1
-                    while os.path.exists(full_path):
-                        new_filename = f"{base_name}_{counter}{ext}"
-                        full_path = os.path.join(so_tk_dir, new_filename)
-                        counter += 1
-
-                # Lưu file
-                with open(full_path, 'wb') as f:
-                    f.write(file_content)
+                if not upload_result['success']:
+                    raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
 
                 # Thêm dữ liệu vào Google Sheet
                 google_sheet_success = append_to_google_sheet(extracted_info)
@@ -299,7 +178,7 @@ def process_file_content(file):
                     'success': True,
                     'message': 'Trích xuất và lưu file thành công',
                     'data': extracted_info,
-                    'saved_path': full_path,
+                    'saved_path': upload_result['file_path'],
                     'google_sheet_status': google_sheet_success
                 }
             else:
@@ -522,72 +401,6 @@ def extract_items(table_data):
         print(f"Lỗi khi trích xuất items: {str(e)}")
         print(f"Chi tiết bảng dữ liệu: {table_data}")
         return []
-
-def update_last_row_sheet(invoice_info):
-    """Cập nhật thông tin invoice cho dòng cuối cùng trong Google Sheet"""
-    try:
-        # Cấu hình credentials
-        SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-        SERVICE_ACCOUNT_FILE = './service-account-key.json'
-        SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
-        RANGE_NAME = 'main!A:V'
-
-        if not os.path.exists(SERVICE_ACCOUNT_FILE):
-            send_notification("File service account không tồn tại", "error")
-            return False
-
-        # Khởi tạo credentials và service
-        try:
-            creds = service_account.Credentials.from_service_account_file(
-                SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-            service = build('sheets', 'v4', credentials=creds)
-            sheet = service.spreadsheets()
-        except Exception as e:
-            send_notification(f"Lỗi khởi tạo service: {str(e)}", "error")
-            return False
-
-        # Lấy số dòng hiện tại
-        try:
-            result = sheet.values().get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=RANGE_NAME
-            ).execute()
-            values = result.get('values', [])
-            last_row = len(values)
-
-            if last_row == 0:
-                send_notification("Không có dữ liệu trong sheet", "error")
-                return False
-
-            # Cập nhật các ô cần thiết ở dòng cuối
-            update_range = f'main!P{last_row}:R{last_row}'  # Cột O-Q (15-17)
-            update_values = [[
-                invoice_info.get('invoice_no', ''),
-                invoice_info.get('seriesNo', ''),
-                invoice_info.get('ngay', '')
-            ]]
-
-            body = {
-                'values': update_values
-            }
-
-            sheet.values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range=update_range,
-                valueInputOption='USER_ENTERED',
-                body=body
-            ).execute()
-
-            send_notification("Đã cập nhật thông tin invoice thành công", "success")
-            return True
-
-        except HttpError as e:
-            send_notification(f"Lỗi khi cập nhật Google Sheet: {str(e)}", "error")
-            return False
-
-    except Exception as e:
-        send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
-        return False
 
 def async_query_customs_info(customs_number, result_queue):
     """Hàm chạy trong thread riêng để query thông tin"""

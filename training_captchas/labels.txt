@@ -92,3 +92,16 @@ captcha_87.png	ZWRDQ
 captcha_88.png	CZLNS
 captcha_89.png	PMCQK
 captcha_90.png	PDZY 
+captcha_91.png	KKRKC
+captcha_92.png	VYDEY
+captcha_93.png	ZIAEV
+captcha_94.png	UTRRA
+captcha_95.png	GQQLA
+captcha_96.png	WLZMW
+captcha_97.png	RIALP
+captcha_98.png	NQVSB
+captcha_99.png	QMHFV
+captcha_100.png	NDVPG
+captcha_101.png	WJCPG
+captcha_102.png	JDABW
+captcha_103.png	HDSIA

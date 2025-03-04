@@ -14,8 +14,14 @@ import subprocess
 import time
 import os
 import base64
-from utils import send_notification
+from utils import send_notification, get_download_directory
 from extract_info import update_last_row_sheet
+
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import io
+from google_drive_utils import upload_file_to_drive
 
 def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
@@ -85,12 +91,12 @@ def process_download(driver, username, so_tk=None, download_status=None):
     try:
         # Lưu handle của tab hiện tại
         current_handle = driver.current_window_handle
+        actions = ActionChains(driver)
 
         # Mở trang đăng nhập trong tab mới
         driver.execute_script("window.open('http://thuphi.haiphong.gov.vn:8222/dang-nhap', '_blank');")
         # Đăng nhập
         if fill_login_info(driver, username, username):
-            print("Đăng nhập thành công")
             send_notification("Đăng nhập thành công", "success")
         else:
             raise Exception("Không thể đăng nhập")
@@ -128,24 +134,45 @@ def process_download(driver, username, so_tk=None, download_status=None):
                     if captcha_text and len(captcha_text) >= 5:
                         save_captcha_and_label(driver, captcha_text)
                         captcha_saved = True
-                        print("Đã lưu thông tin captcha")
 
                 if current_url != driver.current_url:
                     if driver.current_url == "http://thuphi.haiphong.gov.vn:8222/Home":
-                        print("Đăng nhập thành công")
                         login_success = True
                         break
             except Exception as e:
-                print(f"Lỗi khi kiểm tra: {e}")
                 continue
 
         if not login_success:
             raise Exception("Đăng nhập không thành công sau 60 giây")
 
-        # Điều hướng và tải file
-        navigate_to_bien_lai_list(driver, so_tk)
+        # Truy cập trực tiếp trang danh sách biên lai
+        wait = WebDriverWait(driver, 20)
+        bien_lai_url = "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu"
+        driver.get(bien_lai_url)
+        send_notification("Đang chuyển đến trang danh sách biên lai...", "info")
 
-        wait = WebDriverWait(driver, 10)
+        # Nếu có số tờ khai, thực hiện tìm kiếm
+        if so_tk:
+            try:
+                time.sleep(3)  # Đợi trang load xong
+                so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
+                so_tk_input.clear()
+                so_tk_input.send_keys(so_tk)
+                send_notification(f"Đã điền số tờ khai: {so_tk}")
+
+                search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
+                # Hover và click vào nút tìm kiếm
+                actions.move_to_element(search_button).perform()
+                time.sleep(1)
+                actions.click().perform()
+                send_notification("Đã nhấp nút tìm kiếm")
+
+                time.sleep(3)  # Đợi kết quả tìm kiếm
+            except Exception as e:
+                send_notification(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}", "error")
+                raise
+
+        # Tìm các link biên lai
         links = wait.until(EC.presence_of_all_elements_located((
             By.CSS_SELECTOR,
             "a.color-blue.underline[href^='http://113.160.97.58:8224/Viewer/HoaDonViewer.aspx?mhd='][href$='iscd=1']"
@@ -204,9 +231,7 @@ def process_download(driver, username, so_tk=None, download_status=None):
         if localhost_handle and localhost_handle in driver.window_handles:
             driver.switch_to.window(localhost_handle)
             send_notification("Đã trở về trang chủ", "info")
-
         return True
-
     except Exception as e:
         error_msg = f"Lỗi: {str(e)}"
         print(error_msg)
@@ -367,83 +392,24 @@ def save_captcha_and_label(driver, captcha_text):
         print(f"Lỗi khi lưu captcha và label: {e}")
         return False
 
-def get_file_info(driver, link_element):
-    """Lấy thông tin từ row chứa link để đặt tên file"""
-    try:
-        row = link_element.find_element(By.XPATH, "./ancestor::tr")
-        columns = row.find_elements(By.TAG_NAME, "td")
-        so_tk = columns[4].text.strip()
-        ngay = columns[5].text.strip()
-        ngay_formatted = ngay.replace('/', '')
-        filename = f"{so_tk}.pdf"
-        filename = "".join(c for c in filename if c.isalnum() or c in ['_', '-', '.'])
-        return filename
-    except Exception as e:
-        print(f"Lỗi khi lấy thông tin file: {e}")
-        return None
-
 def download_pdf(driver, link_element):
-    """Tải file PDF"""
+    """Tải file PDF và lưu vào Google Drive"""
     try:
         href = link_element.get_attribute('href')
-        # Lưu lại handle của tab hiện tại
         current_handle = driver.current_window_handle
 
-        # Tìm row chứa link (đi ngược lên từ thẻ a đến tr)
+        # Lấy thông tin từ bảng
         row = link_element.find_element(By.XPATH, "./ancestor::tr")
         columns = row.find_elements(By.TAG_NAME, "td")
-
-        # Lấy giá trị từ cột thứ 5 và 6 (index 4 và 5)
         custom_no = columns[4].text.strip()
         ngay = columns[5].text.strip()
-        seriesNo = columns[7].text.strip()
-        print(f"SeriesNo: {seriesNo}")
         invoice_no = columns[8].text.strip()
 
-        # Tạo dictionary chứa thông tin hóa đơn
-        invoice_info = {
-            'invoice_no': invoice_no,
-            'seriesNo': seriesNo,
-            'ngay': ngay
-        }
-
-        # Cập nhật thông tin vào dòng cuối của Google Sheet
-        update_last_row_sheet(invoice_info)
-
-
-        # Chuyển đổi định dạng ngày từ DD/MM/YYYY thành DDMMYYYY
+        # Format ngày và tên file
         ngay_formatted = ngay.replace('/', '')
+        filename = f"CSHT_{invoice_no}.pdf"
 
-        # Tạo tên file
-        filename = get_file_info(driver, link_element)
-
-        # Tạo cấu trúc thư mục
-        base_dir = "downloaded_pdfs"
-        date_dir = os.path.join(base_dir, ngay_formatted)
-        so_tk_dir = os.path.join(date_dir, custom_no)
-
-        # Tạo các thư mục nếu chưa tồn tại
-        for directory in [base_dir, date_dir, so_tk_dir]:
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-                print(f"Đã tạo thư mục: {directory}")
-
-        # Đường dẫn đầy đủ của file (trong thư mục số tờ khai)
-        full_path = os.path.join(so_tk_dir, filename)
-
-        # Kiểm tra nếu file đã tồn tại
-        if os.path.exists(full_path):
-            base_name = os.path.splitext(filename)[0]
-            counter = 1
-            while os.path.exists(full_path):
-                new_filename = f"{base_name}_{counter}.pdf"
-                full_path = os.path.join(so_tk_dir, new_filename)
-                counter += 1
-
-        print(f"Tên file: {os.path.basename(full_path)}")
-        print(f"Đường dẫn: {full_path}")
-
-        # Mở và tải PDF
+        # Tải PDF
         driver.execute_script(f"window.open('{href}', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
         wait = WebDriverWait(driver, 5)
@@ -455,24 +421,29 @@ def download_pdf(driver, link_element):
             'printBackground': True,
             'preferCSSPageSize': True,
         }
-
         pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
         pdf_data = base64.b64decode(pdf['data'])
 
-        # Lưu file
-        with open(full_path, 'wb') as f:
-            f.write(pdf_data)
+        # Upload lên Drive
+        upload_result = upload_file_to_drive(
+            file_content=pdf_data,
+            filename=filename,
+            parent_folder_date=ngay_formatted,
+            custom_no=custom_no
+        )
 
-        print(f"Đã tải và lưu file: {full_path}")
+        if not upload_result['success']:
+            raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
 
-        # Chỉ đóng tab và switch về tab gốc sau khi đã lưu file thành công
+        print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
+        send_notification(f"Đã lưu file {filename} vào Google Drive", "success")
+
         driver.close()
         driver.switch_to.window(current_handle)
-
         return True
 
     except Exception as e:
         print(f"Lỗi khi tải PDF: {e}")
-        # Trong trường hợp lỗi, không tự động đóng tab
+        send_notification(f"Lỗi khi tải file: {str(e)}", "error")
         return False
 

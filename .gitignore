@@ -10,7 +10,7 @@ downloaded_pdfs/
 training_captchas/
 
 # Google API credentials
-service-account-key.json
+driver-key.json
 *-service-account.json
 client_secret*.json
 credentials.json

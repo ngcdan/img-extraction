@@ -24,6 +24,203 @@ from googleapiclient.http import MediaIoBaseUpload
 import io
 from google_drive_utils import upload_file_to_drive, DriveService
 
+import os
+import sys
+from datetime import datetime
+from typing import List, Dict, Any
+from pdfminer.high_level import extract_text
+from utils import send_notification
+from google_sheet_utils import append_to_google_sheet_new
+
+# Import các hàm helper từ extract_info.py
+from extract_info import (
+    split_sections,
+    extract_header_info,
+    convert_price_to_number
+)
+
+def batch_process_files(files: List[str]) -> Dict[str, Any]:
+    """
+    Xử lý nhiều file PDF cùng lúc, trích xuất thông tin header và ghi vào Google Sheet
+
+    Args:
+        files: List of file paths to process
+
+    Returns:
+        dict: Kết quả xử lý với thông tin success/error
+    """
+    try:
+        # Khởi tạo Chrome driver một lần cho toàn bộ quá trình
+        driver = initialize_chrome()
+        if not driver:
+            raise Exception("Không thể khởi tạo Chrome driver")
+
+        # Danh sách lưu kết quả trích xuất
+        extracted_results = []
+        drive_upload_results = []
+
+        for file_path in files:
+            try:
+                # Kiểm tra file tồn tại
+                if not os.path.exists(file_path):
+                    print(f"File không tồn tại: {file_path}")
+                    continue
+
+                # Đọc và trích xuất text từ PDF
+                with open(file_path, 'rb') as pdf_file:
+                    file_content = pdf_file.read()
+
+                text = extract_text(io.BytesIO(file_content))
+                sections = split_sections(text)
+
+                if not sections:
+                    print(f"Không thể phân tích file: {file_path}")
+                    continue
+
+                # Trích xuất thông tin header
+                header_info = extract_header_info(sections['header'])
+                if header_info:
+                    # Thêm metadata
+                    header_info.update({
+                        'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'source_file': os.path.basename(file_path)
+                    })
+
+                    # Upload file lên Drive với cấu trúc thư mục
+                    ngay_formatted = header_info['date'].replace('/', '') if header_info.get('date') else datetime.now().strftime('%d%m%Y')
+
+                    upload_result = upload_file_to_drive(
+                        file_content=file_content,
+                        filename=os.path.basename(file_path),
+                        parent_folder_date=ngay_formatted,
+                        custom_no=header_info.get('customs_number', '')
+                    )
+
+                    if upload_result['success']:
+                        header_info['drive_file_path'] = upload_result['file_path']
+                        drive_upload_results.append({
+                            'file': os.path.basename(file_path),
+                            'status': 'success',
+                            'path': upload_result['file_path']
+                        })
+                    else:
+                        drive_upload_results.append({
+                            'file': os.path.basename(file_path),
+                            'status': 'error',
+                            'error': upload_result.get('error', 'Unknown error')
+                        })
+
+                    extracted_results.append(header_info)
+
+            except Exception as e:
+                error_msg = f"Lỗi xử lý file {file_path}: {str(e)}"
+                print(error_msg)
+                send_notification(error_msg, "error")
+                continue
+
+        if not extracted_results:
+            raise ValueError("Không có dữ liệu được trích xuất từ các file")
+
+        # Sắp xếp kết quả theo tax_number
+        sorted_results = sorted(
+            extracted_results,
+            key=lambda x: x.get('tax_number', '0')
+        )
+        print(json.dumps(sorted_results, indent=4, ensure_ascii=False))
+
+        # Xử lý download cho từng kết quả
+        download_success = 0
+        download_error = 0
+
+        for result in sorted_results:
+            try:
+                tax_number = result.get('tax_number')
+                customs_number = result.get('customs_number')
+
+                if tax_number and customs_number:
+                    download_status = {'current': 0, 'total': 1, 'success': 0}
+                    if process_download(
+                        driver=driver,
+                        username=tax_number,
+                        so_tk=customs_number,
+                        download_status=download_status
+                    ):
+                        download_success += 1
+                        send_notification(
+                            f"Đã tải thành công biên lai cho MST {tax_number}",
+                            "success"
+                        )
+                    else:
+                        download_error += 1
+                        send_notification(
+                            f"Lỗi tải biên lai cho MST {tax_number}",
+                            "error"
+                        )
+            except Exception as e:
+                error_msg = f"Lỗi khi tải biên lai: {str(e)}"
+                print(error_msg)
+                send_notification(error_msg, "error")
+                download_error += 1
+
+        # Ghi từng record vào Google Sheet
+        sheet_success = 0
+        sheet_error = 0
+
+        for result in sorted_results:
+            try:
+                if append_to_google_sheet_new(result):
+                    sheet_success += 1
+                    send_notification(
+                        f"Đã ghi thành công dữ liệu từ file {result['source_file']}",
+                        "success"
+                    )
+                else:
+                    sheet_error += 1
+                    send_notification(
+                        f"Lỗi ghi dữ liệu từ file {result['source_file']}",
+                        "error"
+                    )
+            except Exception as e:
+                error_msg = f"Lỗi khi ghi dữ liệu vào Sheet: {str(e)}"
+                print(error_msg)
+                send_notification(error_msg, "error")
+                sheet_error += 1
+
+        # Đóng driver sau khi hoàn thành
+        try:
+            driver.quit()
+        except:
+            pass
+
+        return {
+            'success': True,
+            'message': f'Đã xử lý {len(files)} file',
+            'stats': {
+                'total_files': len(files),
+                'processed': len(extracted_results),
+                'download_success': download_success,
+                'download_error': download_error,
+                'sheet_success': sheet_success,
+                'sheet_error': sheet_error,
+                'drive_uploads': drive_upload_results
+            }
+        }
+
+    except Exception as e:
+        error_msg = f"Lỗi trong quá trình xử lý batch: {str(e)}"
+        print(error_msg)
+        send_notification(error_msg, "error")
+        # Đảm bảo đóng driver trong trường hợp lỗi
+        try:
+            if driver:
+                driver.quit()
+        except:
+            pass
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
 def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
     try:

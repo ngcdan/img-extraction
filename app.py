@@ -1,27 +1,31 @@
+import sys
+import os
 from flask import Flask, render_template, request, jsonify, send_file
 import threading
 from flask_cors import CORS
 import time
-import os
-import io
 from datetime import datetime
 from utils import init_socketio, send_notification
-from receipt_fetcher import (initialize_chrome, process_download)
+from receipt_fetcher import initialize_chrome, process_download
 from extract_info import process_file_content
+import webbrowser
 
-app = Flask(__name__)
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    base_path = getattr(sys, '_MEIPASS', os.path.abspath("."))
+    return os.path.join(base_path, relative_path)
+
+app = Flask(__name__,
+    template_folder=resource_path('templates'),
+    static_folder=resource_path('static')
+)
 CORS(app, resources={r"/*": {"origins": "*"}})
-
-# Không cần monkey patch khi sử dụng threading mode
 socketio = init_socketio(app)
 
 # Global variables
 driver = None
 download_status = {
-    'total': 0,
-    'current': 0,
-    'success': 0,
-    'failed': 0,
+    'total': 0, 'current': 0, 'success': 0, 'failed': 0,
     'status': 'idle'  # idle, running, completed, error
 }
 
@@ -32,81 +36,23 @@ def index():
 @app.route('/start', methods=['POST'])
 def start_download():
     global driver, download_status
-
     try:
         username = request.form.get('username')
         if not username or not username.strip().isdigit():
-            return jsonify({'error': 'Mã số thuế không hợp lệ'})
+            return jsonify({'error': 'Invalid tax code'})
 
         so_tk = request.form.get('so_tk')
+        driver = ensure_driver_is_active(driver)
+        if not driver:
+            return jsonify({'error': 'Unable to initialize Chrome'})
 
-        # Kiểm tra và khởi tạo lại driver nếu cần
-        try:
-            # Thử truy cập một thuộc tính để kiểm tra driver còn hoạt động không
-            if driver is not None:
-                driver.current_url
-        except Exception as e:
-            print(f"Driver không khả dụng, khởi tạo lại: {str(e)}")
-            try:
-                if driver is not None:
-                    driver.quit()
-            except:
-                pass
-            driver = None
-
-        # Khởi tạo driver mới nếu cần
-        if driver is None:
-            driver = initialize_chrome()
-            if not driver:
-                send_notification("Không thể khởi tạo Chrome", "error")
-                return jsonify({'error': 'Không thể khởi tạo Chrome'})
-
-        # Reset trạng thái download
-        download_status = {
-            'total': 0,
-            'current': 0,
-            'success': 0,
-            'failed': 0,
-            'status': 'running'
-        }
-
-        def download_wrapper():
-            global driver, download_status
-            try:
-                process_download(driver, username, so_tk, download_status)
-            except Exception as e:
-                error_msg = f"Lỗi trong quá trình tải: {str(e)}"
-                print(error_msg)
-                send_notification(error_msg, "error")
-                download_status['status'] = 'error'
-                # Thử khởi tạo lại driver nếu có lỗi
-                try:
-                    if driver is not None:
-                        driver.quit()
-                except:
-                    pass
-                driver = None
-
-        # Bắt đầu process download trong thread riêng
-        download_thread = threading.Thread(
-            target=download_wrapper
-        )
-        download_thread.daemon = True
-        download_thread.start()
-
+        reset_download_status()
+        start_download_thread(username, so_tk)
         return jsonify({'status': 'started'})
 
     except Exception as e:
-        error_message = f"Lỗi khi bắt đầu tải: {str(e)}"
-        send_notification(error_message, "error")
-        # Thử khởi tạo lại driver nếu có lỗi
-        try:
-            if driver is not None:
-                driver.quit()
-        except:
-            pass
-        driver = None
-        return jsonify({'error': error_message})
+        handle_download_error(str(e))
+        return jsonify({'error': f'Error starting download: {str(e)}'})
 
 @app.route('/status')
 def get_status():
@@ -114,58 +60,89 @@ def get_status():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    """Route xử lý upload file và trích xuất thông tin"""
     try:
         if 'file' not in request.files:
-            return jsonify({'success': False, 'error': 'Không tìm thấy file'})
+            return jsonify({'success': False, 'error': 'File not found'})
 
         file = request.files['file']
         result = process_file_content(file)
-
         return jsonify(result)
 
     except Exception as e:
-        print(f"Lỗi server: {e}")
-        return jsonify({
-            'success': False,
-            'error': f'Lỗi server: {str(e)}'
-        })
+        print(f"Server error: {e}")
+        return jsonify({'success': False, 'error': f'Server error: {str(e)}'})
+
+def ensure_driver_is_active(driver):
+    if driver is None or not is_driver_alive(driver):
+        driver = initialize_chrome()
+        if driver:
+            time.sleep(2)  # Wait for driver to fully start
+    return driver
+
+def is_driver_alive(driver):
+    try:
+        driver.current_url
+        return True
+    except:
+        return False
+
+def reset_download_status():
+    global download_status
+    download_status = {
+        'total': 0, 'current': 0, 'success': 0, 'failed': 0,
+        'status': 'running'
+    }
+
+def start_download_thread(username, so_tk):
+    download_thread = threading.Thread(
+        target=lambda: safe_process_download(username, so_tk)
+    )
+    download_thread.daemon = True
+    download_thread.start()
+
+def safe_process_download(username, so_tk):
+    global driver, download_status
+    try:
+        process_download(driver, username, so_tk, download_status)
+    except Exception as e:
+        handle_download_error(str(e))
+
+def handle_download_error(error_message):
+    global driver, download_status
+    print(f"Download error: {error_message}")
+    send_notification(error_message, "error")
+    download_status['status'] = 'error'
+    if driver:
+        try:
+            driver.quit()
+        except:
+            pass
+        driver = None
 
 def close_specific_tabs(url_pattern):
-    """Đóng các tab có địa chỉ chứa url_pattern"""
     global driver
     if not driver:
         return
 
     try:
-        # Lưu lại handle của tab hiện tại
         current_handle = driver.current_window_handle
-
-        # Lấy tất cả các handle
-        handles = driver.window_handles
-
-        # Duyệt qua từng handle và đóng tab phù hợp
-        for handle in handles[:]:  # Tạo bản sao của list để tránh lỗi khi xóa phần tử
+        for handle in driver.window_handles[:]:
             try:
                 driver.switch_to.window(handle)
                 if url_pattern in driver.current_url:
-                    print(f"Đóng tab: {driver.current_url}")
+                    print(f"Closing tab: {driver.current_url}")
                     driver.close()
             except:
                 continue
 
-        # Kiểm tra xem còn tab nào không
         remaining_handles = driver.window_handles
-        if remaining_handles:
-            # Chuyển về tab đầu tiên nếu tab hiện tại đã bị đóng
-            if current_handle not in remaining_handles:
-                driver.switch_to.window(remaining_handles[0])
+        if remaining_handles and current_handle not in remaining_handles:
+            driver.switch_to.window(remaining_handles[0])
 
     except Exception as e:
-        print(f"Lỗi khi đóng tab: {e}")
+        print(f"Error closing tabs: {e}")
 
 def cleanup():
-    """Dọn dẹp tài nguyên khi tắt app"""
     global driver
     if driver:
         try:
@@ -175,33 +152,21 @@ def cleanup():
         driver = None
 
 def open_browser():
-    """Mở trình duyệt mặc định với trang web của app"""
-    import webbrowser
-    webbrowser.open('http://localhost:8080')  # Đổi port ở đây
+    webbrowser.open('http://localhost:8080')
 
 if __name__ == '__main__':
     try:
-        # Khởi tạo Chrome trong thread riêng
-        chrome_thread = threading.Thread(target=initialize_chrome)
-        chrome_thread.daemon = True
-        chrome_thread.start()
-
-        # Đăng ký hàm cleanup khi tắt app
+        threading.Thread(target=initialize_chrome, daemon=True).start()
         import atexit
         atexit.register(cleanup)
-
-        # Mở trình duyệt sau 2 giây
         threading.Timer(2.0, open_browser).start()
 
-        # Chạy Flask app với threading
         socketio.run(app,
             host='0.0.0.0',
             port=8080,
             debug=False,
-            allow_unsafe_werkzeug=True,
-            use_reloader=False  # Disable reloader khi build
+            allow_unsafe_werkzeug=True
         )
-
     except Exception as e:
-        print(f"Lỗi khi khởi động app: {e}")
+        print(f"Error starting app: {e}")
         cleanup()

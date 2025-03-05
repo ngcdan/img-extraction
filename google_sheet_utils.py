@@ -48,7 +48,7 @@ def prepare_row_data(line_item, extracted_info, current_row):
         'vendor': 'VETC',
         'charge_code': 'B_EWF',
         'description': 'EXPRESS WAY FEES',
-        'unit': 'shipment'
+        'unit': 'container'
     }
 
     return [
@@ -124,6 +124,92 @@ def append_to_google_sheet(extracted_info):
         try:
             execute_append(sheet, values)
             send_notification(f"Đã thêm {len(line_items)} dòng vào Google Sheet", "success")
+            return True
+        except Exception as e:
+            send_notification(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}", "error")
+            return False
+
+    except Exception as e:
+        send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
+        return False
+
+def append_to_google_sheet_new(extracted_info):
+    """Thêm thông tin vào Google Sheet"""
+    try:
+        sheet_instance = SheetService.get_instance()
+        sheet = sheet_instance.service.spreadsheets()
+
+        """Chuẩn bị dữ liệu cho một dòng trong sheet"""
+        fixed_data = {
+            'service_code': 'CL014920',
+            'vendor': 'VETC',
+            'charge_code': 'B_EWF',
+            'description': 'EXPRESS WAY FEES',
+            'unit': 'container'
+        }
+
+
+        result = {
+            'so_ct': None,
+            'date': None,
+            'tax_number': None,
+            'customs_number': None,
+            'partner_invoice_name': None
+        }
+
+        # Lấy số dòng hiện tại
+        try:
+            result = sheet.values().get(
+                spreadsheetId=SPREADSHEET_ID,
+                range=RANGE_NAME
+            ).execute()
+            current_row = len(result.get('values', []))
+        except HttpError as e:
+            send_notification(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}", "error")
+            return False
+
+        # Lấy số dòng hiện tại
+        try:
+            result = sheet.values().get(
+                spreadsheetId=SPREADSHEET_ID,
+                range=RANGE_NAME
+            ).execute()
+            current_row = len(result.get('values', []))
+        except HttpError as e:
+            send_notification(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}", "error")
+            return False
+
+        values = []
+        row_data = [
+            current_row,  # STT
+            extracted_info.get('so_ct', ''),  # Số chứng từ
+            fixed_data['service_code'],
+            fixed_data['vendor'],
+            extracted_info.get('jobId', ''),
+            extracted_info.get('hawb', ''),
+            extracted_info.get('customs_number', ''),
+            fixed_data['charge_code'],
+            fixed_data['description'],
+            '',
+            '',
+            '',
+            ''
+            '',
+            '',
+            extracted_info.get('tax_number', '') != '0303482440',
+            '', '', '',
+            extracted_info.get('tax_number'),
+            extracted_info.get('partner_invoice_name'),
+            '',  # Cột 20 để trống (Notes)
+            '',
+            ''
+        ]
+        values.append(row_data)
+
+        # Thực hiện append với retry
+        try:
+            execute_append(sheet, values)
+            send_notification(f"Đã thêm 1 dòng vào Google Sheet", "success")
             return True
         except Exception as e:
             send_notification(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}", "error")

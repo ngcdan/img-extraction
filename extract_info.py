@@ -398,7 +398,7 @@ def extract_items(table_data):
                     'container_no': container_numbers[i],
                     'label': labels[i] if i < len(labels) else '',
                     'unit': units[i] if i < len(units) else 'Đồng/Container',
-                    'price': int(unit_prices[i].replace('.', '')),
+                    'unit_price': int(unit_prices[i].replace('.', '')),
                     'quantity': int(quantities[i]),
                     'amount': int(amounts[i].replace('.', ''))
                 }

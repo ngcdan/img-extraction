@@ -47,19 +47,6 @@
             placeholder="Nhập mã số thuế">
         </div>
 
-        <div class="input-group" style="width: 100%;">
-          <label for="so_tk">
-            Số tờ khai
-            <span class="optional">(không bắt buộc)</span>
-          </label>
-          <input
-            type="text"
-            id="so_tk"
-            class="form-input"
-            placeholder="Nhập số tờ khai nếu cần">
-          <small class="hint">Để trống nếu muốn tải tất cả biên lai trong tháng</small>
-        </div>
-
         <button
           class="download-btn"
           onclick="startDownload()">
@@ -194,12 +181,12 @@ fileInput.addEventListener('change', function() {
 function handleFiles(files) {
   if (files.length > 0) {
     const file = files[0];
-    if (file.type === 'text/plain' || file.type === 'application/pdf') {
+    if (file.type === 'application/pdf') {
       showFileInfo(file);
       fileInput.files = files; // Update file input
       extractBtn.disabled = false;
     } else {
-      showMessage('Chỉ chấp nhận file .txt hoặc .pdf', 'error');
+      showMessage('Chỉ chấp nhận file .pdf', 'error');
       removeFile();
     }
   }
@@ -244,18 +231,11 @@ function uploadFile() {
     } else {
       // Tự động điền thông tin vào form
       const usernameInput = document.getElementById('username');
-      const soTkInput = document.getElementById('so_tk');
 
       if (data.data.tax_number) {
         usernameInput.value = data.data.tax_number;
         usernameInput.classList.add('filled');
         setTimeout(() => usernameInput.classList.remove('filled'), 2000);
-      }
-
-      if (data.data.customs_number) {
-        soTkInput.value = data.data.customs_number;
-        soTkInput.classList.add('filled');
-        setTimeout(() => soTkInput.classList.remove('filled'), 2000);
       }
 
       showMessage('Đã điền thông tin từ file', 'success');
@@ -270,130 +250,114 @@ function uploadFile() {
   });
 }
 
-function useExtractedInfo() {
-    const taxNumber = document.getElementById('extracted-tax').textContent;
-    const customsNumber = document.getElementById('extracted-customs').textContent;
+function startDownload() {
+  const username = document.getElementById('username').value.trim();
 
-    if (taxNumber !== 'Không tìm thấy') {
-        document.getElementById('username').value = taxNumber;
-    }
-    if (customsNumber !== 'Không tìm thấy') {
-        document.getElementById('so_tk').value = customsNumber;
-    }
+  if (!username) {
+    showToast('Vui lòng nhập mã số thuế', 'error');
+    return;
+  }
 
-    showMessage('Đã điền thông tin', 'success');
+  if (!/^\d+$/.test(username)) {
+    showToast('Mã số thuế chỉ được chứa số', 'error');
+    return;
+  }
+
+  // Disable nút download và hiển thị trạng thái loading
+  const downloadBtn = document.querySelector('button[onclick="startDownload()"]');
+  if (downloadBtn) {
+    downloadBtn.disabled = true;
+    downloadBtn.textContent = 'Đang xử lý...';
+  }
+
+  // Reset và hiển thị status container
+  const statusContainer = document.getElementById('status');
+  if (statusContainer) {
+    statusContainer.style.display = 'block';
+    document.getElementById('current').textContent = '0';
+    document.getElementById('total').textContent = '0';
+    document.getElementById('success').textContent = '0';
+    document.getElementById('failed').textContent = '0';
+    document.getElementById('progress').style.width = '0%';
+  }
+
+  // Gửi request
+  fetch('/start', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      'username': username
+    })
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(data => {
+    if (data.error) {
+      showToast(data.error, 'error');
+    } else {
+      showToast('Bắt đầu tải...', 'info');
+      startStatusCheck();
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    showToast('Lỗi khi gửi yêu cầu: ' + error.message, 'error');
+  })
+  .finally(() => {
+    // Enable lại nút download
+    if (downloadBtn) {
+      downloadBtn.disabled = false;
+      downloadBtn.textContent = 'Bắt đầu tải';
+    }
+  });
 }
 
-    function startDownload() {
-        const username = document.getElementById('username').value.trim();
-        const so_tk = document.getElementById('so_tk').value.trim();
+function startStatusCheck() {
+  const statusCheck = setInterval(() => {
+    fetch('/status')
+    .then(response => response.json())
+    .then(data => {
+      updateStatus(data);
+      if (data.status === 'completed' || data.status === 'error') {
+        clearInterval(statusCheck);
+      }
+    })
+    .catch(error => {
+      console.error('Error fetching status:', error);
+      clearInterval(statusCheck);
+    });
+  }, 1000);
+}
 
-        if (!username) {
-            showToast('Vui lòng nhập mã số thuế', 'error');
-            return;
-        }
+function updateStatus(data) {
+  document.getElementById('current').textContent = data.current;
+  document.getElementById('total').textContent = data.total;
+  document.getElementById('success').textContent = data.success;
+  document.getElementById('failed').textContent = data.failed;
 
-        if (!/^\d+$/.test(username)) {
-            showToast('Mã số thuế chỉ được chứa số', 'error');
-            return;
-        }
+  if (data.total > 0) {
+    const progress = (data.current / data.total) * 100;
+    document.getElementById('progress').style.width = `${progress}%`;
+  }
 
-        // Disable nút download và hiển thị trạng thái loading
-        const downloadBtn = document.querySelector('button[onclick="startDownload()"]');
-        if (downloadBtn) {
-            downloadBtn.disabled = true;
-            downloadBtn.textContent = 'Đang xử lý...';
-        }
+  if (data.status === 'completed') {
+    showMessage('Tải xuống hoàn tất!', 'success');
+  } else if (data.status === 'error') {
+    showMessage('Đã xảy ra lỗi!', 'error');
+  }
+}
 
-        // Reset và hiển thị status container
-        const statusContainer = document.getElementById('status');
-        if (statusContainer) {
-            statusContainer.style.display = 'block';
-            document.getElementById('current').textContent = '0';
-            document.getElementById('total').textContent = '0';
-            document.getElementById('success').textContent = '0';
-            document.getElementById('failed').textContent = '0';
-            document.getElementById('progress').style.width = '0%';
-        }
-
-        // Gửi request
-        fetch('/start', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                'username': username,
-                'so_tk': so_tk || '' // Đảm bảo so_tk không undefined
-            })
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.error) {
-                showToast(data.error, 'error');
-            } else {
-                showToast('Bắt đầu tải...', 'info');
-                startStatusCheck(); // Bắt đầu kiểm tra trạng thái
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            showToast('Lỗi khi gửi yêu cầu: ' + error.message, 'error');
-        })
-        .finally(() => {
-            // Enable lại nút download
-            if (downloadBtn) {
-                downloadBtn.disabled = false;
-                downloadBtn.textContent = 'Bắt đầu tải';
-            }
-        });
-    }
-
-    function startStatusCheck() {
-        const statusCheck = setInterval(() => {
-            fetch('/status')
-            .then(response => response.json())
-            .then(data => {
-                updateStatus(data);
-                if (data.status === 'completed' || data.status === 'error') {
-                    clearInterval(statusCheck);
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching status:', error);
-                clearInterval(statusCheck);
-            });
-        }, 1000);
-    }
-
-        function updateStatus(data) {
-            document.getElementById('current').textContent = data.current;
-            document.getElementById('total').textContent = data.total;
-            document.getElementById('success').textContent = data.success;
-            document.getElementById('failed').textContent = data.failed;
-
-            if (data.total > 0) {
-                const progress = (data.current / data.total) * 100;
-                document.getElementById('progress').style.width = `${progress}%`;
-            }
-
-            if (data.status === 'completed') {
-                showMessage('Tải xuống hoàn tất!', 'success');
-            } else if (data.status === 'error') {
-                showMessage('Đã xảy ra lỗi!', 'error');
-            }
-        }
-
-        function showMessage(message, type) {
-            const messageDiv = document.getElementById('message');
-            messageDiv.textContent = message;
-            messageDiv.className = `message ${type}`;
-        }
+function showMessage(message, type) {
+  const messageDiv = document.getElementById('message');
+  messageDiv.textContent = message;
+  messageDiv.className = `message ${type}`;
+}
     </script>
   </body>
 </html>

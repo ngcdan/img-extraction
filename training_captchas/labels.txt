@@ -112,3 +112,6 @@ captcha_107.png	RSFUP
 captcha_108.png	YMyer
 captcha_109.png	VEWLH
 captcha_110.png	LTGWB
+captcha_111.png	DSVAK
+captcha_112.png	FYNNN
+captcha_113.png	LSCLF

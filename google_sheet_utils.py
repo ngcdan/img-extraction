@@ -148,7 +148,6 @@ def append_to_google_sheet_new(extracted_info):
             'unit': 'container'
         }
 
-
         result = {
             'so_ct': None,
             'date': None,
@@ -219,51 +218,76 @@ def append_to_google_sheet_new(extracted_info):
         send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
         return False
 
-def update_last_row_sheet(invoice_info):
-    """Cập nhật thông tin invoice cho dòng cuối cùng trong Google Sheet"""
+def update_invoice_info(invoice_info):
+    """
+    Cập nhật thông tin invoice vào Google Sheet
+
+    Args:
+        invoice_info: dict chứa thông tin invoice {
+            'custom_no': số tờ khai,
+            'invoice_no': số hóa đơn,
+            'seriesNo': số series,
+            'ngay': ngày hóa đơn,
+            'total_amount': tổng tiền
+        }
+    """
     try:
         sheet_instance = SheetService.get_instance()
         sheet = sheet_instance.service.spreadsheets()
 
-        # Lấy số dòng hiện tại
-        try:
-            result = sheet.values().get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=RANGE_NAME
-            ).execute()
-            values = result.get('values', [])
-            last_row = len(values)
+        # Tìm dòng chứa số tờ khai
+        result = sheet.values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=RANGE_NAME
+        ).execute()
+        values = result.get('values', [])
 
-            if last_row == 0:
-                send_notification("Không có dữ liệu trong sheet", "error")
-                return False
+        # Tìm dòng có số tờ khai tương ứng (cột G - index 6)
+        target_row = None
+        for i, row in enumerate(values, 1):  # Bắt đầu từ 1 vì Google Sheet bắt đầu từ 1
+            if len(row) > 6 and row[6] == invoice_info['custom_no']:
+                target_row = i
+                break
 
-            # Cập nhật các ô cần thiết ở dòng cuối
-            update_range = f'main!P{last_row}:R{last_row}'  # Cột P-R (16-18)
-            update_values = [[
-                invoice_info.get('invoice_no', ''),
-                invoice_info.get('seriesNo', ''),
-                invoice_info.get('ngay', '')
-            ]]
-
-            body = {
-                'values': update_values
-            }
-
-            sheet.values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range=update_range,
-                valueInputOption='USER_ENTERED',
-                body=body
-            ).execute()
-
-            send_notification("Đã cập nhật thông tin invoice thành công", "success")
-            return True
-
-        except HttpError as e:
-            send_notification(f"Lỗi khi cập nhật Google Sheet: {str(e)}", "error")
+        if not target_row:
+            send_notification(f"Không tìm thấy dòng có số tờ khai {invoice_info['custom_no']}", "warning")
             return False
 
+        # Cập nhật thông tin vào các cột tương ứng
+        update_range = f'main!P{target_row}:R{target_row}'  # Cột P-R (16-18)
+        update_values = [[
+            invoice_info['invoice_no'],
+            invoice_info['seriesNo'],
+            invoice_info['ngay']
+        ]]
+
+        body = {
+            'values': update_values
+        }
+
+        sheet.values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=update_range,
+            valueInputOption='USER_ENTERED',
+            body=body
+        ).execute()
+
+        # Cập nhật total_amount vào cột N (14)
+        amount_range = f'main!N{target_row}'
+        amount_body = {
+            'values': [[invoice_info['total_amount']]]
+        }
+
+        sheet.values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=amount_range,
+            valueInputOption='USER_ENTERED',
+            body=amount_body
+        ).execute()
+
+        send_notification("Đã cập nhật thông tin invoice thành công", "success")
+        return True
+
     except Exception as e:
-        send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
+        send_notification(f"Lỗi khi cập nhật thông tin invoice: {str(e)}", "error")
         return False

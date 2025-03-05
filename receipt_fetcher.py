@@ -90,9 +90,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     upload_result = upload_file_to_drive(
                         file_content=file_content,
                         filename=os.path.basename(file_path),
-                        parent_folder_date=ngay_formatted,
-                        custom_no=header_info.get('customs_number', '')
-                    )
+                        parent_folder_date=ngay_formatted)
 
                     if upload_result['success']:
                         header_info['drive_file_path'] = upload_result['file_path']
@@ -629,7 +627,10 @@ def download_pdf(driver, link_element):
         columns = row.find_elements(By.TAG_NAME, "td")
         custom_no = columns[4].text.strip()
         ngay = columns[5].text.strip()
+        seriesNo = columns[7].text.strip()
         invoice_no = columns[8].text.strip()
+        total = columns[11].text.strip()
+        total_amount = convert_price_to_number(total)
 
         # Format ngày và tên file
         ngay_formatted = ngay.replace('/', '')
@@ -640,28 +641,19 @@ def download_pdf(driver, link_element):
         service = drive_instance.service
         root_folder_id = drive_instance.root_folder_id
 
-        # Tìm folder ngày
+        # Tìm file trong folder ngày
         date_query = f"name = '{ngay_formatted}' and mimeType = 'application/vnd.google-apps.folder' and '{root_folder_id}' in parents"
         date_results = service.files().list(q=date_query, spaces='drive', fields='files(id)').execute()
 
         if date_results.get('files'):
             date_folder_id = date_results['files'][0]['id']
+            file_query = f"name = '{filename}' and mimeType = 'application/pdf' and '{date_folder_id}' in parents"
+            file_results = service.files().list(q=file_query, spaces='drive', fields='files(id)').execute()
 
-            # Tìm folder số tờ khai trong folder ngày
-            custom_query = f"name = '{custom_no}' and mimeType = 'application/vnd.google-apps.folder' and '{date_folder_id}' in parents"
-            custom_results = service.files().list(q=custom_query, spaces='drive', fields='files(id)').execute()
-
-            if custom_results.get('files'):
-                custom_folder_id = custom_results['files'][0]['id']
-
-                # Tìm file trong folder số tờ khai
-                file_query = f"name = '{filename}' and mimeType = 'application/pdf' and '{custom_folder_id}' in parents"
-                file_results = service.files().list(q=file_query, spaces='drive', fields='files(id)').execute()
-
-                if file_results.get('files'):
-                    print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}/{custom_no}")
-                    send_notification(f"File {filename} đã tồn tại trong Drive", "info")
-                    return True
+            if file_results.get('files'):
+                print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
+                send_notification(f"File {filename} đã tồn tại trong Drive", "info")
+                return True
 
         # Nếu file chưa tồn tại, tiếp tục tải
         driver.execute_script(f"window.open('{href}', '_blank');")
@@ -682,15 +674,28 @@ def download_pdf(driver, link_element):
         upload_result = upload_file_to_drive(
             file_content=pdf_data,
             filename=filename,
-            parent_folder_date=ngay_formatted,
-            custom_no=custom_no
-        )
+            parent_folder_date=ngay_formatted)
 
         if not upload_result['success']:
             raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
 
         print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
         send_notification(f"Đã lưu file {filename} vào Google Drive", "success")
+
+        # Cập nhật thông tin vào Google Sheet
+        from google_sheet_utils import update_invoice_info
+        invoice_info = {
+            'custom_no': custom_no,
+            'invoice_no': invoice_no,
+            'seriesNo': seriesNo,
+            'ngay': ngay,
+            'total_amount': total_amount
+        }
+        update_result = update_invoice_info(invoice_info)
+        if update_result:
+            print("Đã cập nhật thông tin vào Google Sheet")
+        else:
+            print("Lỗi khi cập nhật Google Sheet")
 
         driver.close()
         driver.switch_to.window(current_handle)

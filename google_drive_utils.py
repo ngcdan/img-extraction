@@ -101,15 +101,14 @@ def get_or_create_folder(service, parent_id, folder_name):
         print(f"Lỗi khi tìm/tạo folder: {e}")
         return None
 
-def upload_file_to_drive(file_content, filename, parent_folder_date, custom_no, mimetype='application/pdf', folder_type='CUSTOMS'):
+def upload_file_to_drive(file_content, filename, parent_folder_date, mimetype='application/pdf', folder_type='CUSTOMS'):
     """
-    Upload file lên Google Drive với cấu trúc thư mục ngày/số_tờ_khai
+    Upload file lên Google Drive với cấu trúc thư mục ngày
 
     Args:
         file_content: Nội dung file dạng bytes
         filename: Tên file
         parent_folder_date: Tên folder ngày (định dạng DDMMYYYY)
-        custom_no: Số tờ khai hải quan
         mimetype: Loại file (mặc định là PDF)
         folder_type: Loại folder gốc (mặc định là CUSTOMS)
     """
@@ -151,18 +150,14 @@ def upload_file_to_drive(file_content, filename, parent_folder_date, custom_no, 
                 'file_path': f"captchas/{filename}"
             }
 
-        # Xử lý cho CUSTOMS như cũ
+        # Xử lý cho CUSTOMS - lưu trực tiếp vào folder ngày
         date_folder_id = get_or_create_folder(service, root_id, parent_folder_date)
         if not date_folder_id:
             raise Exception("Không thể tạo/tìm folder ngày")
 
-        custom_folder_id = get_or_create_folder(service, date_folder_id, custom_no)
-        if not custom_folder_id:
-            raise Exception("Không thể tạo/tìm folder số tờ khai")
-
         file_metadata = {
             'name': filename,
-            'parents': [custom_folder_id]
+            'parents': [date_folder_id]
         }
 
         media = MediaIoBaseUpload(
@@ -177,7 +172,7 @@ def upload_file_to_drive(file_content, filename, parent_folder_date, custom_no, 
             fields='id, webViewLink'
         ).execute()
 
-        file_path = f"{parent_folder_date}/{custom_no}/{filename}"
+        file_path = f"{parent_folder_date}/{filename}"
 
         return {
             'success': True,
@@ -278,6 +273,95 @@ def upload_captcha_to_drive(captcha_content, filename=None, mimetype='image/png'
     except Exception as e:
         error_msg = f"Lỗi khi upload captcha lên Drive: {str(e)}"
         send_notification(error_msg, "error")
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def append_to_labels_file(filename, label):
+    """
+    Append captcha filename và label vào file labels.txt trên Drive
+
+    Args:
+        filename: Tên file captcha (e.g., 'captcha_123.png')
+        label: Label của captcha
+    """
+    try:
+        drive_instance = DriveService.get_instance()
+        service = drive_instance.service
+        root_id = drive_instance.get_root_folder_id('CAPTCHAS')
+
+        if not root_id:
+            raise Exception("Không tìm thấy folder CAPTCHAS")
+
+        # Tìm file labels.txt
+        query = [
+            f"'{root_id}' in parents",
+            "name = 'labels.txt'",
+            "trashed = false"
+        ]
+
+        results = service.files().list(
+            q=" and ".join(query),
+            spaces='drive',
+            fields='files(id)',
+        ).execute()
+
+        files = results.get('files', [])
+
+        if not files:
+            # Tạo file labels.txt nếu chưa tồn tại
+            file_metadata = {
+                'name': 'labels.txt',
+                'parents': [root_id],
+                'mimeType': 'text/plain'
+            }
+            labels_file = service.files().create(
+                body=file_metadata,
+                fields='id'
+            ).execute()
+            labels_file_id = labels_file['id']
+        else:
+            labels_file_id = files[0]['id']
+
+        # Đọc nội dung hiện tại
+        content = ""
+        try:
+            request = service.files().get_media(fileId=labels_file_id)
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+            content = fh.getvalue().decode('utf-8')
+        except:
+            # File có thể rỗng hoặc mới tạo
+            pass
+
+        # Thêm dòng mới
+        new_line = f"{filename}\t{label}\n"
+        updated_content = content + new_line
+
+        # Upload nội dung mới
+        file_metadata = {'name': 'labels.txt'}
+        media = MediaIoBaseUpload(
+            io.BytesIO(updated_content.encode('utf-8')),
+            mimetype='text/plain',
+            resumable=True
+        )
+
+        service.files().update(
+            fileId=labels_file_id,
+            body=file_metadata,
+            media_body=media
+        ).execute()
+
+        return {
+            'success': True
+        }
+
+    except Exception as e:
+        error_msg = f"Lỗi khi append vào labels.txt: {str(e)}"
         return {
             'success': False,
             'error': error_msg

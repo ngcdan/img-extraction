@@ -189,8 +189,8 @@ def append_to_google_sheet_new(extracted_info):
             extracted_info.get('customs_number', ''),
             fixed_data['charge_code'],
             fixed_data['description'],
-            '',
-            '',
+            1,
+            fixed_data['unit'],
             '',
             ''
             '',
@@ -220,7 +220,7 @@ def append_to_google_sheet_new(extracted_info):
 
 def update_invoice_info(invoice_info):
     """
-    Cập nhật thông tin invoice vào Google Sheet
+    Cập nhật thông tin invoice vào Google Sheet cho dòng đầu tiên có số tờ khai tương ứng và cột P trống
 
     Args:
         invoice_info: dict chứa thông tin invoice {
@@ -242,15 +242,21 @@ def update_invoice_info(invoice_info):
         ).execute()
         values = result.get('values', [])
 
-        # Tìm dòng có số tờ khai tương ứng (cột G - index 6)
+        # Tìm dòng đầu tiên có số tờ khai tương ứng (cột G - index 6) và cột P (index 15) trống
         target_row = None
         for i, row in enumerate(values, 1):  # Bắt đầu từ 1 vì Google Sheet bắt đầu từ 1
             if len(row) > 6 and row[6] == invoice_info['custom_no']:
-                target_row = i
-                break
+                # Kiểm tra cột P trống
+                if len(row) <= 15 or not row[15].strip():
+                    target_row = i
+                    break
 
         if not target_row:
-            send_notification(f"Không tìm thấy dòng có số tờ khai {invoice_info['custom_no']}", "warning")
+            send_notification(
+                f"Không tìm thấy dòng phù hợp cho số tờ khai {invoice_info['custom_no']} "
+                "hoặc tất cả các dòng đã có thông tin invoice",
+                "warning"
+            )
             return False
 
         # Cập nhật thông tin vào các cột tương ứng

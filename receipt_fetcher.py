@@ -122,6 +122,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             extracted_results,
             key=lambda x: x.get('tax_number', '0')
         )
+        print('\n\nKết quả trích xuất:\n')
         print(json.dumps(sorted_results, indent=4, ensure_ascii=False))
 
         # Xử lý download cho từng kết quả
@@ -404,8 +405,32 @@ def process_download(driver, username, so_tk=None, download_status=None):
 
         # Truy cập trang danh sách biên lai
         wait = WebDriverWait(driver, 20)
+        actions = ActionChains(driver)
+
         driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
         send_notification("Đang chuyển đến trang danh sách biên lai...", "info")
+
+        # Nếu có số tờ khai, thực hiện tìm kiếm
+        if so_tk:
+            try:
+                time.sleep(3)  # Đợi trang load xong
+                so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
+                so_tk_input.clear()
+                so_tk_input.send_keys(so_tk)
+                send_notification(f"Đã điền số tờ khai: {so_tk}")
+                time.sleep(1)  # Đợi trang load xong
+
+                search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
+                # Hover và click vào nút tìm kiếm
+                actions.move_to_element(search_button).perform()
+                time.sleep(0.5)
+                actions.click().perform()
+                send_notification("Đã nhấp nút tìm kiếm")
+
+                time.sleep(3)  # Đợi kết quả tìm kiếm
+            except Exception as e:
+                send_notification(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}", "error")
+                raise
 
         # Đợi và tìm các link biên lai
         links = wait.until(EC.presence_of_all_elements_located((
@@ -601,13 +626,20 @@ def save_captcha_and_label(driver, captcha_text):
         captcha_element = driver.find_element(By.ID, "CaptchaImage")
         png_data = captcha_element.screenshot_as_png
 
-        from google_drive_utils import upload_captcha_to_drive
+        from google_drive_utils import upload_captcha_to_drive, append_to_labels_file
         result = upload_captcha_to_drive(png_data)
 
         if result['success']:
             print(f"Đã lưu captcha {result['filename']} với label: {captcha_text}")
-            # TODO: Lưu mapping captcha text vào file riêng nếu cần
-            return True
+
+            # Append vào file labels.txt trên Drive
+            append_result = append_to_labels_file(result['filename'], captcha_text)
+            if append_result['success']:
+                print("Đã thêm label vào file labels.txt trên Drive")
+                return True
+            else:
+                print(f"Lỗi khi thêm label: {append_result.get('error')}")
+                return False
         else:
             print(f"Lỗi khi lưu captcha: {result.get('error')}")
             return False

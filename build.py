@@ -2,12 +2,13 @@ import sys
 import subprocess
 import os
 from pathlib import Path
+import argparse
 
 def install_requirements():
     """Install required packages"""
     subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
 
-def build_application():
+def build_application(show_console=True):
     """Build the application for current platform"""
     # Define main file and data files
     main_file = 'test_batch_process.py'
@@ -30,10 +31,14 @@ def build_application():
     # Platform specific options
     if sys.platform == 'win32':
         options.extend([
-            '--noconsole',        # Windows: Hide console window
             '--uac-admin',        # Request admin privileges
             '--icon=static/icon.ico' if os.path.exists('static/icon.ico') else None
         ])
+
+        # Add --noconsole only if show_console is False
+        if not show_console:
+            options.append('--noconsole')
+
     else:  # macOS
         options.extend([
             '--icon=static/icon.icns' if os.path.exists('static/icon.icns') else None
@@ -62,14 +67,20 @@ def build_application():
     try:
         subprocess.run(command, check=True)
         output_file = 'pdf_processor.exe' if sys.platform == 'win32' else 'pdf_processor'
-        print(f"\nBuild successful! Output file: dist/{output_file}")
+        console_status = "với console" if show_console else "không có console"
+        print(f"\nBuild successful! Output file: dist/{output_file} ({console_status})")
     except subprocess.CalledProcessError as e:
         print(f"\nBuild failed with error: {e}")
         sys.exit(1)
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Build PDF Processor application')
+    parser.add_argument('--no-console', action='store_true',
+                      help='Hide console window in Windows build')
+    args = parser.parse_args()
+
     print("Installing requirements...")
     install_requirements()
 
     print("\nBuilding application...")
-    build_application()
+    build_application(show_console=not args.no_console)

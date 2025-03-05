@@ -29,20 +29,18 @@ def clean_build():
 def collect_all_files():
     """Thu thập tất cả các file và thư mục cần thiết"""
     items_to_include = [
-        'venv',
         'templates',
         'static',
         'cookies',
         'downloads',
         '.env',
         'service-account-key.json',
-        'driver-service-account.json',
-        'app.py',
-        'utils.py',
+        'test_batch_process.py',
         'receipt_fetcher.py',
         'extract_info.py',
         'google_sheet_utils.py',
         'google_drive_utils.py',
+        'utils.py',
         'requirements.txt'
     ]
 
@@ -64,15 +62,15 @@ def build_windows():
     print("Đang build cho Windows...")
     clean_build()
 
-    app_name = "ImgExtraction-windows"
+    app_name = "CustomsPDFProcessor"
     separator = ';'
     data_files = collect_all_files()
 
     params = [
-        'app.py',
+        'test_batch_process.py',
         f'--name={app_name}',
         '--onefile',
-        '--noconsole',
+        '--noconsole',  # Chuyển sang GUI mode
         '--clean',
         '--noconfirm',
     ]
@@ -88,17 +86,8 @@ def build_windows():
 
     # Windows-specific imports
     hidden_imports = [
-        'flask',
-        'flask_cors',
-        'flask_socketio',
         'selenium',
         'pyodbc',
-        'socketio',
-        'engineio',
-        'eventlet',
-        'dns',
-        'dns.resolver',
-        'pdfminer',
         'google.oauth2',
         'googleapiclient',
         'openpyxl',
@@ -106,42 +95,12 @@ def build_windows():
         'webdriver_manager',
         'requests',
         'threading',
-        'win32com',  # Windows specific
-        'win32api',  # Windows specific
+        'win32com',
+        'win32api',
     ]
-
-    hidden_imports.extend([
-        'engineio.async_drivers.threading',
-        'engineio.async_drivers.eventlet',
-        'dns.resolver',
-        'dns.exception',
-        'dns.rdatatype',
-        'dns.name',
-        'dns.message',
-        'dns.query',
-        'dns.rdata',
-        'dns.rdataclass',
-        'dns.rdtypes.*',
-        'dns.rdtypes.ANY.*',
-        'dns.rdtypes.IN.*'
-    ])
 
     for imp in hidden_imports:
         params.append(f'--hidden-import={imp}')
-
-    params.extend([
-        '--collect-submodules=selenium',
-        '--collect-submodules=webdriver_manager',
-        '--collect-all=webdriver_manager',
-        '--collect-all=selenium',
-        '--hidden-import=engineio.async_drivers.threading',
-        '--hidden-import=engineio.async_drivers.eventlet',
-        '--hidden-import=dns',
-        '--hidden-import=dns.resolver',
-        '--collect-all=dns',
-        '--collect-all=engineio',
-        '--collect-all=socketio'
-    ])
 
     return params, app_name
 
@@ -150,17 +109,18 @@ def build_macos():
     print("Đang build cho macOS...")
     clean_build()
 
-    app_name = "ImgExtraction"
+    app_name = "CustomsPDFProcessor"
     separator = ':'
     data_files = collect_all_files()
 
     params = [
-        'app.py',
+        'test_batch_process.py',
         f'--name={app_name}',
         '--onefile',
-        '--noconsole',
+        '--noconsole',  # Chuyển sang GUI mode
         '--clean',
         '--noconfirm',
+        '--windowed',  # Thêm flag cho macOS app
     ]
 
     # Thêm icon cho macOS
@@ -174,17 +134,8 @@ def build_macos():
 
     # macOS-specific imports
     hidden_imports = [
-        'flask',
-        'flask_cors',
-        'flask_socketio',
         'selenium',
         'pyodbc',
-        'socketio',
-        'engineio',
-        'eventlet',
-        'dns',
-        'dns.resolver',
-        'pdfminer',
         'google.oauth2',
         'googleapiclient',
         'openpyxl',
@@ -192,42 +143,12 @@ def build_macos():
         'webdriver_manager',
         'requests',
         'threading',
-        'AppKit',  # macOS specific
-        'Foundation',  # macOS specific
+        'AppKit',
+        'Foundation',
     ]
-
-    hidden_imports.extend([
-        'engineio.async_drivers.threading',
-        'engineio.async_drivers.eventlet',
-        'dns.resolver',
-        'dns.exception',
-        'dns.rdatatype',
-        'dns.name',
-        'dns.message',
-        'dns.query',
-        'dns.rdata',
-        'dns.rdataclass',
-        'dns.rdtypes.*',
-        'dns.rdtypes.ANY.*',
-        'dns.rdtypes.IN.*'
-    ])
 
     for imp in hidden_imports:
         params.append(f'--hidden-import={imp}')
-
-    params.extend([
-        '--collect-submodules=selenium',
-        '--collect-submodules=webdriver_manager',
-        '--collect-all=webdriver_manager',
-        '--collect-all=selenium',
-        '--hidden-import=engineio.async_drivers.threading',
-        '--hidden-import=engineio.async_drivers.eventlet',
-        '--hidden-import=dns',
-        '--hidden-import=dns.resolver',
-        '--collect-all=dns',
-        '--collect-all=engineio',
-        '--collect-all=socketio'
-    ])
 
     return params, app_name
 
@@ -265,16 +186,16 @@ def build_app():
 
         # Tạo file README với hướng dẫn
         readme_content = """
-Hướng dẫn sử dụng:
+Hướng dẫn sử dụng Customs PDF Processor:
 
-1. Đảm bảo đã cài đặt Google Chrome
-2. Chạy file thực thi (ImgExtraction hoặc ImgExtraction-windows.exe)
-3. Trình duyệt sẽ tự động mở tại địa chỉ http://localhost:8080
+1. Đặt các file PDF cần xử lý vào thư mục 'customs' trên Desktop
+2. Chạy ứng dụng CustomsPDFProcessor
+3. Ứng dụng sẽ tự động xử lý tất cả file PDF trong thư mục
 
 Lưu ý:
-- Không xóa bất kỳ thư mục nào trong package
-- Đảm bảo các thư mục cookies và downloads có quyền ghi
-- Nếu gặp lỗi, kiểm tra file .env và service-account-key.json
+- Thư mục 'customs' sẽ được tự động tạo trên Desktop nếu chưa tồn tại
+- Kết quả xử lý sẽ được hiển thị trên màn hình
+- Nhấn Enter để đóng ứng dụng sau khi xử lý xong
         """
 
         with open(os.path.join(dist_dir, 'README.txt'), 'w', encoding='utf-8') as f:

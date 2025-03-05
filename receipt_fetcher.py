@@ -48,23 +48,17 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         dict: Kết quả xử lý với thông tin success/error
     """
     try:
-        # Khởi tạo Chrome driver một lần cho toàn bộ quá trình
-        driver = initialize_chrome()
-        if not driver:
-            raise Exception("Không thể khởi tạo Chrome driver")
-
-        # Danh sách lưu kết quả trích xuất
+        # Danh sách lưu kết quả trích xuất và upload
         extracted_results = []
         drive_upload_results = []
 
+        # 1. Trích xuất thông tin từ tất cả các file trước
         for file_path in files:
             try:
-                # Kiểm tra file tồn tại
                 if not os.path.exists(file_path):
                     print(f"File không tồn tại: {file_path}")
                     continue
 
-                # Đọc và trích xuất text từ PDF
                 with open(file_path, 'rb') as pdf_file:
                     file_content = pdf_file.read()
 
@@ -75,22 +69,20 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     print(f"Không thể phân tích file: {file_path}")
                     continue
 
-                # Trích xuất thông tin header
                 header_info = extract_header_info(sections['header'])
                 if header_info:
-                    # Thêm metadata
                     header_info.update({
                         'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                         'source_file': os.path.basename(file_path)
                     })
 
-                    # Upload file lên Drive với cấu trúc thư mục
+                    # Upload file lên Drive
                     ngay_formatted = header_info['date'].replace('/', '') if header_info.get('date') else datetime.now().strftime('%d%m%Y')
-
                     upload_result = upload_file_to_drive(
                         file_content=file_content,
                         filename=os.path.basename(file_path),
-                        parent_folder_date=ngay_formatted)
+                        parent_folder_date=ngay_formatted
+                    )
 
                     if upload_result['success']:
                         header_info['drive_file_path'] = upload_result['file_path']
@@ -109,9 +101,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     extracted_results.append(header_info)
 
             except Exception as e:
-                error_msg = f"Lỗi xử lý file {file_path}: {str(e)}"
-                print(error_msg)
-                send_notification(error_msg, "error")
+                print(f"Lỗi xử lý file {file_path}: {str(e)}")
                 continue
 
         if not extracted_results:
@@ -122,100 +112,102 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             extracted_results,
             key=lambda x: x.get('tax_number', '0')
         )
-        print('\n\nKết quả trích xuất:\n')
-        print(json.dumps(sorted_results, indent=4, ensure_ascii=False))
 
-        # Xử lý download cho từng kết quả
-        download_success = 0
-        download_error = 0
-
-        for result in sorted_results:
-            try:
-                tax_number = result.get('tax_number')
-                customs_number = result.get('customs_number')
-
-                if tax_number and customs_number:
-                    download_status = {'current': 0, 'total': 1, 'success': 0}
-                    if process_download(
-                        driver=driver,
-                        username=tax_number,
-                        so_tk=customs_number,
-                        download_status=download_status
-                    ):
-                        download_success += 1
-                        send_notification(
-                            f"Đã tải thành công biên lai cho MST {tax_number}",
-                            "success"
-                        )
-                    else:
-                        download_error += 1
-                        send_notification(
-                            f"Lỗi tải biên lai cho MST {tax_number}",
-                            "error"
-                        )
-            except Exception as e:
-                error_msg = f"Lỗi khi tải biên lai: {str(e)}"
-                print(error_msg)
-                send_notification(error_msg, "error")
-                download_error += 1
-
-        # Ghi từng record vào Google Sheet
-        sheet_success = 0
-        sheet_error = 0
-
+        # 2. Ghi tất cả dữ liệu vào Google Sheet (thực hiện trước)
+        sheet_results = []
         for result in sorted_results:
             try:
                 if append_to_google_sheet_new(result):
-                    sheet_success += 1
-                    send_notification(
-                        f"Đã ghi thành công dữ liệu từ file {result['source_file']}",
-                        "success"
-                    )
+                    sheet_results.append({
+                        'file': result['source_file'],
+                        'status': 'success'
+                    })
+                    print(f"Đã ghi thành công dữ liệu từ file {result['source_file']}")
                 else:
-                    sheet_error += 1
-                    send_notification(
-                        f"Lỗi ghi dữ liệu từ file {result['source_file']}",
-                        "error"
-                    )
+                    sheet_results.append({
+                        'file': result['source_file'],
+                        'status': 'error'
+                    })
+                    print(f"Lỗi ghi dữ liệu từ file {result['source_file']}")
             except Exception as e:
-                error_msg = f"Lỗi khi ghi dữ liệu vào Sheet: {str(e)}"
-                print(error_msg)
-                send_notification(error_msg, "error")
-                sheet_error += 1
+                print(f"Lỗi khi ghi dữ liệu vào Sheet: {str(e)}")
+                sheet_results.append({
+                    'file': result['source_file'],
+                    'status': 'error',
+                    'error': str(e)
+                })
 
-        # Đóng driver sau khi hoàn thành
+        # 3. Sau đó mới thực hiện download
+        driver = None
         try:
-            driver.quit()
-        except:
-            pass
+            driver = initialize_chrome()
+            if not driver:
+                raise Exception("Không thể khởi tạo Chrome driver")
+
+            download_results = []
+            for result in sorted_results:
+                try:
+                    tax_number = result.get('tax_number')
+                    customs_number = result.get('customs_number')
+
+                    if tax_number and customs_number:
+                        download_status = {'current': 0, 'total': 1, 'success': 0}
+                        if process_download(
+                            driver=driver,
+                            username=tax_number,
+                            so_tk=customs_number,
+                            download_status=download_status
+                        ):
+                            download_results.append({
+                                'tax_number': tax_number,
+                                'status': 'success'
+                            })
+                            print(f"Đã tải thành công biên lai cho MST {tax_number}")
+                        else:
+                            download_results.append({
+                                'tax_number': tax_number,
+                                'status': 'error'
+                            })
+                            print(f"Lỗi tải biên lai cho MST {tax_number}")
+                except Exception as e:
+                    print(f"Lỗi khi tải biên lai: {str(e)}")
+                    download_results.append({
+                        'tax_number': tax_number,
+                        'status': 'error',
+                        'error': str(e)
+                    })
+
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
+        # Tính toán thống kê
+        stats = {
+            'total_files': len(files),
+            'processed': len(extracted_results),
+            'sheet_success': len([r for r in sheet_results if r['status'] == 'success']),
+            'sheet_error': len([r for r in sheet_results if r['status'] == 'error']),
+            'download_success': len([r for r in download_results if r['status'] == 'success']),
+            'download_error': len([r for r in download_results if r['status'] == 'error']),
+            'drive_uploads': drive_upload_results
+        }
 
         return {
             'success': True,
             'message': f'Đã xử lý {len(files)} file',
-            'stats': {
-                'total_files': len(files),
-                'processed': len(extracted_results),
-                'download_success': download_success,
-                'download_error': download_error,
-                'sheet_success': sheet_success,
-                'sheet_error': sheet_error,
-                'drive_uploads': drive_upload_results
-            }
+            'stats': stats,
+            'sheet_results': sheet_results,
+            'download_results': download_results
         }
 
     except Exception as e:
-        error_msg = f"Lỗi trong quá trình xử lý batch: {str(e)}"
-        print(error_msg)
-        send_notification(error_msg, "error")
-        # Đảm bảo đóng driver trong trường hợp lỗi
-        try:
-            if driver:
-                driver.quit()
-        except:
-            pass
+        print(f"Lỗi trong quá trình xử lý batch: {str(e)}")
         return {
             'success': False,
-            'error': error_msg
+            'error': str(e)
         }
 
 def initialize_chrome():

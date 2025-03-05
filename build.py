@@ -14,11 +14,30 @@ def build_application(show_console=True):
     main_file = 'test_batch_process.py'
 
     # Collect all required data files
-    data_files = [
+    data_files = []
+
+    # Add required files if they exist
+    required_files = [
         ('.env', '.'),
         ('driver-service-account.json', '.'),
-        ('service_account_key.json', '.')
+        ('service-account-key.json', '.')
     ]
+
+    for src, dest in required_files:
+        if os.path.exists(src):
+            data_files.append((src, dest))
+        else:
+            print(f"Warning: Required file '{src}' not found")
+
+    # Add directories if they exist
+    required_dirs = [
+        ('templates', 'templates'),
+        ('static', 'static')
+    ]
+
+    for src, dest in required_dirs:
+        if os.path.exists(src) and os.path.isdir(src):
+            data_files.append((src, dest))
 
     # Basic PyInstaller options
     options = [
@@ -46,9 +65,8 @@ def build_application(show_console=True):
 
     # Add data files
     for src, dest in data_files:
-        if os.path.exists(src):
-            separator = ';' if sys.platform == 'win32' else ':'
-            options.append(f'--add-data={src}{separator}{dest}')
+        separator = ';' if sys.platform == 'win32' else ':'
+        options.append(f'--add-data={src}{separator}{dest}')
 
     # Remove None values
     options = [opt for opt in options if opt is not None]
@@ -57,7 +75,7 @@ def build_application(show_console=True):
     command = ['pyinstaller'] + options + [main_file]
 
     # Print command for debugging
-    print("Building with command:", ' '.join(command))
+    print("\nBuilding with command:", ' '.join(command))
 
     # Create dist directory if it doesn't exist
     dist_dir = Path('dist')

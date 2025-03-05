@@ -137,7 +137,18 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     'error': str(e)
                 })
 
-        # 3. Sau đó mới thực hiện download
+        # 3. Group results by tax_number
+        grouped_results = {}
+        for result in sorted_results:
+            tax_number = result.get('tax_number')
+            customs_number = result.get('customs_number')
+
+            if tax_number and customs_number:
+                if tax_number not in grouped_results:
+                    grouped_results[tax_number] = []
+                grouped_results[tax_number].append(customs_number)
+
+        # 4. Sau đó mới thực hiện download
         driver = None
         try:
             driver = initialize_chrome()
@@ -145,36 +156,38 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                 raise Exception("Không thể khởi tạo Chrome driver")
 
             download_results = []
-            for result in sorted_results:
+            for tax_number, customs_numbers in grouped_results.items():
                 try:
-                    tax_number = result.get('tax_number')
-                    customs_number = result.get('customs_number')
-
-                    if tax_number and customs_number:
-                        download_status = {'current': 0, 'total': 1, 'success': 0}
-                        if process_download(
-                            driver=driver,
-                            username=tax_number,
-                            so_tk=customs_number,
-                            download_status=download_status
-                        ):
-                            download_results.append({
-                                'tax_number': tax_number,
-                                'status': 'success'
-                            })
-                            print(f"Đã tải thành công biên lai cho MST {tax_number}")
-                        else:
-                            download_results.append({
-                                'tax_number': tax_number,
-                                'status': 'error'
-                            })
-                            print(f"Lỗi tải biên lai cho MST {tax_number}")
+                    download_status = {'current': 0, 'total': len(customs_numbers), 'success': 0}
+                    if process_download(
+                        driver=driver,
+                        username=tax_number,
+                        so_tk_list=customs_numbers,
+                        download_status=download_status
+                    ):
+                        download_results.append({
+                            'tax_number': tax_number,
+                            'status': 'success',
+                            'customs_count': len(customs_numbers),
+                            'success_count': download_status['success']
+                        })
+                        print(f"Đã tải thành công {download_status['success']}/{len(customs_numbers)} biên lai cho MST {tax_number}")
+                    else:
+                        download_results.append({
+                            'tax_number': tax_number,
+                            'status': 'error',
+                            'customs_count': len(customs_numbers),
+                            'success_count': download_status['success']
+                        })
+                        print(f"Lỗi tải biên lai cho MST {tax_number}")
                 except Exception as e:
                     print(f"Lỗi khi tải biên lai: {str(e)}")
                     download_results.append({
                         'tax_number': tax_number,
                         'status': 'error',
-                        'error': str(e)
+                        'error': str(e),
+                        'customs_count': len(customs_numbers),
+                        'success_count': download_status.get('success', 0)
                     })
 
         finally:
@@ -362,14 +375,21 @@ def collect_captcha_if_login(driver):
         print(f"Lỗi khi thu thập captcha: {e}")
         return False
 
-def process_download(driver, username, so_tk=None, download_status=None):
-    """Xử lý quá trình tải biên lai"""
+def process_download(driver, username, so_tk_list=None, download_status=None):
+    """
+    Xử lý quá trình tải biên lai
+    Args:
+        driver: WebDriver instance
+        username: Tên đăng nhập
+        so_tk_list: List số tờ khai (optional)
+        download_status: Dict để theo dõi trạng thái
+    """
     try:
         # Mở tab mới và switch sang
         driver.execute_script("window.open('about:blank', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
 
-        # Tối ưu phần đăng nhập
+        # Phần đăng nhập giữ nguyên
         async def handle_login():
             cookies_loaded = load_cookies(driver, username)
             if cookies_loaded:
@@ -389,62 +409,69 @@ def process_download(driver, username, so_tk=None, download_status=None):
                 save_cookies(driver, username)
             return login_success
 
-        # Sử dụng asyncio để xử lý đăng nhập
+        # Đăng nhập
         import asyncio
         if not asyncio.run(handle_login()):
             raise Exception("Không thể đăng nhập")
 
-        # Tối ưu phần tìm kiếm biên lai
         wait = WebDriverWait(driver, 20)
-        driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
+        total_success = 0
 
-        if so_tk:
-            # Sử dụng JavaScript để điền form và submit
-            js_script = f"""
-                document.querySelector('input[name="SO_TK"]').value = '{so_tk}';
-                document.querySelector('button.btnSearch').click();
-            """
-            driver.execute_script(js_script)
-            time.sleep(2)  # Đợi ngắn hơn cho kết quả
+        # Xử lý từng số tờ khai
+        if so_tk_list:
+            for idx, so_tk in enumerate(so_tk_list, 1):
+                print(f"Đang xử lý số tờ khai {idx}/{len(so_tk_list)}: {so_tk}")
 
-        # Tối ưu phần tải biên lai
-        async def download_receipts(links):
-            tasks = []
-            for i, link in enumerate(links, 1):
-                if 'Xem' in link.text:
-                    if download_status:
-                        download_status['current'] = i
-                    tasks.append(download_pdf_async(driver, link, i, total_links))
-            return await asyncio.gather(*tasks)
+                try:
+                    # Truy cập trang tìm kiếm
+                    driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
+                    time.sleep(1)
 
-        # Tìm tất cả links một lần
-        links = wait.until(EC.presence_of_all_elements_located((
-            By.CSS_SELECTOR,
-            "a.color-blue.underline[href^='http://113.160.97.58:8224/Viewer/HoaDonViewer.aspx?mhd='][href$='iscd=1']"
-        )))
+                    # Điền số tờ khai và tìm kiếm
+                    so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
+                    so_tk_input.clear()
+                    so_tk_input.send_keys(so_tk)
 
-        if not links:
-            print("Không tìm thấy biên lai nào")
-            return False
+                    search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
+                    search_button.click()
+                    time.sleep(2)
 
-        total_links = len(links)
-        if download_status:
-            download_status['total'] = total_links
+                    # Tìm links cho số tờ khai hiện tại
+                    current_links = wait.until(EC.presence_of_all_elements_located((
+                        By.CSS_SELECTOR,
+                        "a.color-blue.underline[href^='http://113.160.97.58:8224/Viewer/HoaDonViewer.aspx?mhd='][href$='iscd=1']"
+                    )))
 
-        # Tải song song các biên lai
-        results = asyncio.run(download_receipts(links))
+                    if current_links:
+                        print(f"Tìm thấy {len(current_links)} biên lai cho số tờ khai {so_tk}")
+
+                        # Download ngay lập tức các biên lai của tờ khai này
+                        async def download_current_receipts():
+                            tasks = []
+                            for i, link in enumerate(current_links, 1):
+                                if 'Xem' in link.text:
+                                    tasks.append(download_pdf_async(driver, link, i, len(current_links)))
+                            return await asyncio.gather(*tasks)
+
+                        # Thực hiện download
+                        results = asyncio.run(download_current_receipts())
+                        success_count = sum(1 for r in results if r)
+                        total_success += success_count
+
+                        print(f"Đã tải xong {success_count}/{len(current_links)} biên lai cho số tờ khai {so_tk}")
+                    else:
+                        print(f"Không tìm thấy biên lai nào cho số tờ khai {so_tk}")
+
+                except Exception as e:
+                    print(f"Lỗi khi xử lý số tờ khai {so_tk}: {str(e)}")
+                    continue
 
         # Cập nhật trạng thái
         if download_status:
-            download_status['success'] = sum(1 for r in results if r)
-            download_status['failed'] = sum(1 for r in results if not r)
+            download_status['success'] = total_success
             download_status['status'] = 'completed'
 
-            success_rate = (download_status['success'] / total_links) * 100
-            print(f"Hoàn tất: {download_status['success']}/{total_links} biên lai ({success_rate:.1f}%)")
-
-        # Đóng các tab phụ
-        cleanup_tabs(driver)  # Gọi hàm sync
+        cleanup_tabs(driver)
         return True
 
     except Exception as e:

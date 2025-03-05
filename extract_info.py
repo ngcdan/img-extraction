@@ -1,9 +1,7 @@
 import os
-import pyodbc
 import io
 from datetime import datetime
 from pdfminer.high_level import extract_text
-from utils import send_notification
 from google_drive_utils import upload_file_to_drive
 from google_sheet_utils import append_to_google_sheet
 
@@ -57,45 +55,6 @@ def split_sections(text):
 
     except Exception as e:
         print(f"Lỗi khi xử lý và phân vùng dữ liệu: {str(e)}")
-        return None
-
-def query_customs_info(customs_number):
-    """Tạo kết nối SQL Server và truy vấn thông tin"""
-    try:
-        conn_str = (
-            "DRIVER={ODBC Driver 17 for SQL Server};"
-            f"SERVER={os.getenv('DB_SERVER')};"
-            f"DATABASE={os.getenv('DB_NAME')};"
-            f"UID={os.getenv('DB_USER')};"
-            f"PWD={os.getenv('DB_PASSWORD')};"
-            f"Encrypt={os.getenv('DB_ENCRYPT', 'yes')};"
-            f"TrustServerCertificate={os.getenv('DB_TRUST_SERVER_CERTIFICATE', 'yes')};"
-        )
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
-
-        query = """
-            SELECT
-                td.TransID, td.HWBNO, cs.TKSo, ui.FullName as nguoi_khai
-            FROM TransactionDetails td
-                JOIN CustomsDeclaration cs ON cs.MasoTK = td.CustomsID
-                JOIN UserInfos ui ON ui.Username = cs.NguoiKhai
-            WHERE cs.TKSo = ?
-        """
-
-        cursor.execute(query, customs_number)
-        result = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        if result:
-            return result
-        return None
-
-    except Exception as e:
-        error_msg = f"Lỗi database: {str(e)}"
-        print(error_msg)
-        send_notification(error_msg, "error")
         return None
 
 def extract_header_info(lines):
@@ -258,21 +217,12 @@ def process_pdf(pdf_path):
         items = extract_items(sections['table'])
         result['line_items'] = items
 
-        customs_number = result['customs_number']
-        if customs_number:
-            query_result = query_customs_info(customs_number)
-            if query_result and len(query_result) > 0:
-                result.update({
-                    'jobId': query_result[0].TransID,
-                    'hawb': query_result[0].HWBNO,
-                    'nguoi_khai': query_result[0].nguoi_khai
-                })
-            else:
-                result.update({
-                    'jobId': '',
-                    'hawb': '',
-                    'nguoi_khai': ''
-                })
+        # Xóa phần query SQL Server
+        result.update({
+            'jobId': '',
+            'hawb': '',
+            'nguoi_khai': ''
+        })
 
         return result
 

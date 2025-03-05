@@ -1,49 +1,28 @@
-# Core dependencies (Chung cho cả Windows và macOS)
-Flask==2.0.1
-Flask-SocketIO==5.3.6
-Flask-CORS==3.0.10
-Werkzeug==2.0.3
-python-socketio==5.7.2
-python-engineio==4.3.4
+# Core dependencies
 python-dotenv==0.19.0
 requests==2.31.0
-
-# Database
-pyodbc==5.2.0
-
-# Browser Automation
-selenium==4.1.0
-webdriver-manager==4.0.2
+argparse>=1.4.0
 
 # PDF & Document Processing
 pdfminer.six==20221105
 openpyxl==3.1.2
 Pillow==10.0.0
 
-# OCR Engine
-opencv-python==4.8.0.76
+# Browser Automation
+selenium==4.1.0
+webdriver-manager==4.0.2
 
 # Google Integration
 google-api-python-client==2.108.0
 google-auth==2.23.4
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
-google-cloud-storage==2.13.0
-google-cloud-core==2.3.3
-
-# Machine Learning (Captcha Model)
-numpy>=1.21.0
 
 # Utils
-rapidfuzz>=2.0.0
 tenacity>=8.0.0
 
-# Development & Build
+# Build tools
 pyinstaller==5.13.2
-black>=23.0.0; extra == 'dev'
-flake8>=6.0.0; extra == 'dev'
 
-# Windows-specific dependencies
+# Windows-specific
 pywin32==305; sys_platform == 'win32'
-
-eventlet==0.39.0

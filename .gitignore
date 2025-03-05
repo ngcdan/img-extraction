@@ -3,6 +3,9 @@
 .env
 .env.local
 .env.*.local
+cookies
+build
+dist
 
 # Data directories
 data/

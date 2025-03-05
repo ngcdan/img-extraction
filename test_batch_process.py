@@ -3,7 +3,6 @@ import sys
 import platform
 import argparse
 from receipt_fetcher import batch_process_files
-from utils import send_notification
 import tkinter as tk
 from tkinter import messagebox
 
@@ -61,13 +60,6 @@ def main():
     parser.add_argument('--quiet', action='store_true', help='Suppress notifications')
 
     args = parser.parse_args()
-
-    # Override send_notification if quiet mode is enabled
-    if args.quiet:
-        def quiet_notification(message, type=None):
-            pass
-        global send_notification
-        send_notification = quiet_notification
 
     # Get files to process
     if args.files:

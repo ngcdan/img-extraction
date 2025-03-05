@@ -3,7 +3,6 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from tenacity import retry, stop_after_attempt, wait_exponential
-from utils import send_notification
 
 # Cấu hình chung
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
@@ -33,7 +32,7 @@ class SheetService:
                     SERVICE_ACCOUNT_FILE, scopes=SCOPES)
                 self._service = build('sheets', 'v4', credentials=credentials)
             except Exception as e:
-                send_notification(f"Lỗi khởi tạo Sheet service: {str(e)}", "error")
+                print(f"Lỗi khởi tạo Sheet service: {str(e)}")
                 raise
 
     @property
@@ -164,7 +163,7 @@ def append_to_google_sheet_new(extracted_info):
             ).execute()
             current_row = len(result.get('values', []))
         except HttpError as e:
-            send_notification(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}", "error")
+            print(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}")
             return False
 
         # Lấy số dòng hiện tại
@@ -175,7 +174,7 @@ def append_to_google_sheet_new(extracted_info):
             ).execute()
             current_row = len(result.get('values', []))
         except HttpError as e:
-            send_notification(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}", "error")
+            print(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}")
             return False
 
         values = []
@@ -208,14 +207,14 @@ def append_to_google_sheet_new(extracted_info):
         # Thực hiện append với retry
         try:
             execute_append(sheet, values)
-            send_notification(f"Đã thêm 1 dòng vào Google Sheet", "success")
+            print(f"Đã thêm 1 dòng vào Google Sheet")
             return True
         except Exception as e:
-            send_notification(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}", "error")
+            print(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}")
             return False
 
     except Exception as e:
-        send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
+        print(f"Lỗi không mong đợi: {str(e)}")
         return False
 
 def update_invoice_info(invoice_info):

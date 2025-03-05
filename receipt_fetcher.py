@@ -27,7 +27,6 @@ import sys
 from datetime import datetime
 from typing import List, Dict, Any
 from pdfminer.high_level import extract_text
-from utils import send_notification
 from google_sheet_utils import append_to_google_sheet_new
 
 # Import các hàm helper từ extract_info.py
@@ -213,7 +212,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
     try:
-        send_notification("Đang khởi tạo Chrome driver...", "info")
+        print("Đang khởi tạo Chrome driver...")
 
         # Xác định đường dẫn profile mặc định của Chrome
         if platform.system() == 'Windows':
@@ -235,9 +234,9 @@ def initialize_chrome():
             response = requests.get('http://127.0.0.1:9222/json/version')
             if response.status_code == 200:
                 chrome_running = True
-                send_notification("Đã tìm thấy Chrome đang chạy với debug port", "info")
+                print("Đã tìm thấy Chrome đang chạy với debug port")
         except:
-            send_notification("Khởi động Chrome mới với debug port...", "info")
+            print("Khởi động Chrome mới với debug port...")
 
         if not chrome_running:
             # Khởi động Chrome mới mà không cần tắt các instance hiện tại
@@ -261,16 +260,16 @@ def initialize_chrome():
 
         try:
             driver = webdriver.Chrome(service=service, options=chrome_options)
-            send_notification("Đã kết nối với Chrome thành công", "success")
+            print("Đã kết nối với Chrome thành công")
             return driver
         except Exception as e:
             error_message = f"Lỗi khi kết nối với Chrome: {str(e)}"
-            send_notification(error_message, "error")
+            print(error_message)
             return None
 
     except Exception as e:
         error_message = f"Lỗi khi khởi tạo Chrome: {str(e)}"
-        send_notification(error_message, "error")
+        print(error_message)
         return None
 
 def save_cookies(driver, username):
@@ -542,36 +541,36 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         tra_cuu_link = wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//a[.//p[contains(text(), 'Tra cứu')]]")
         ))
-        send_notification("Đã tìm thấy mục 'Tra cứu', chuẩn bị hover...")
+        print("Đã tìm thấy mục 'Tra cứu', chuẩn bị hover...")
 
         # Hover vào menu Tra cứu
         actions.move_to_element(tra_cuu_link).perform()
         time.sleep(1)  # Đợi animation hover
-        send_notification("Đã hover vào 'Tra cứu'")
+        print("Đã hover vào 'Tra cứu'")
 
         # Click vào menu Tra cứu
         actions.click().perform()
-        send_notification("Đã nhấp vào 'Tra cứu'")
+        print("Đã nhấp vào 'Tra cứu'")
 
         # Đợi và mở rộng menu con
         menu_treeview = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "ul.nav-treeview")))
         driver.execute_script("arguments[0].style.display = 'block'; arguments[0].classList.add('show');", menu_treeview)
-        send_notification("Đã hiển thị menu con")
+        print("Đã hiển thị menu con")
         time.sleep(1)  # Đợi animation menu
 
         # Tìm link biên lai
         bien_lai_link = wait.until(EC.element_to_be_clickable(
             (By.CSS_SELECTOR, "a[href='/danh-sach-tra-cuu-bien-lai-dien-tu']")
         ))
-        send_notification("Đã tìm thấy '2. Danh sách biên lai điện tử', chuẩn bị hover...")
+        print("Đã tìm thấy '2. Danh sách biên lai điện tử', chuẩn bị hover...")
 
         # Hover và click vào link biên lai
         actions.move_to_element(bien_lai_link).perform()
         time.sleep(1)  # Đợi animation hover
-        send_notification("Đã hover vào link biên lai")
+        print("Đã hover vào link biên lai")
 
         actions.click().perform()
-        send_notification("Đã nhấp vào '2. Danh sách biên lai điện tử'")
+        print("Đã nhấp vào '2. Danh sách biên lai điện tử'")
 
         # Nếu có số tờ khai, thực hiện tìm kiếm
         if so_tk:
@@ -580,22 +579,22 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
                 so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
                 so_tk_input.clear()
                 so_tk_input.send_keys(so_tk)
-                send_notification(f"Đã điền số tờ khai: {so_tk}")
+                print(f"Đã điền số tờ khai: {so_tk}")
 
                 search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
                 # Hover và click vào nút tìm kiếm
                 actions.move_to_element(search_button).perform()
                 time.sleep(0.5)
                 actions.click().perform()
-                send_notification("Đã nhấp nút tìm kiếm")
+                print("Đã nhấp nút tìm kiếm")
 
                 time.sleep(3)  # Đợi kết quả tìm kiếm
             except Exception as e:
-                send_notification(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}", "error")
+                print(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}")
                 raise
 
     except Exception as e:
-        send_notification(f"Lỗi khi điều hướng và tìm kiếm biên lai: {str(e)}", "error")
+        print(f"Lỗi khi điều hướng và tìm kiếm biên lai: {str(e)}")
         raise
 
 def save_captcha_and_label(driver, captcha_text):
@@ -662,7 +661,7 @@ def download_pdf(driver, link_element):
 
             if file_results.get('files'):
                 print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
-                send_notification(f"File {filename} đã tồn tại trong Drive", "info")
+                print(f"File {filename} đã tồn tại trong Drive")
                 return True
 
         # Nếu file chưa tồn tại, tiếp tục tải
@@ -690,7 +689,7 @@ def download_pdf(driver, link_element):
             raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
 
         print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
-        send_notification(f"Đã lưu file {filename} vào Google Drive", "success")
+        print(f"Đã lưu file {filename} vào Google Drive")
 
         # Cập nhật thông tin vào Google Sheet
         from google_sheet_utils import update_invoice_info
@@ -713,6 +712,6 @@ def download_pdf(driver, link_element):
 
     except Exception as e:
         print(f"Lỗi khi tải PDF: {e}")
-        send_notification(f"Lỗi khi tải file: {str(e)}", "error")
+        print(f"Lỗi khi tải file: {str(e)}")
         return False
 

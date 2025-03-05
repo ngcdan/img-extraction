@@ -3,7 +3,6 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 import io
 import os
-from utils import send_notification
 
 # Cấu hình chung
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
@@ -38,7 +37,7 @@ class DriveService:
                     SERVICE_ACCOUNT_FILE, scopes=SCOPES)
                 self._service = build('drive', 'v3', credentials=credentials)
             except Exception as e:
-                send_notification(f"Lỗi khởi tạo Drive service: {str(e)}", "error")
+                print(f"Lỗi khởi tạo Drive service: {str(e)}")
                 raise
 
     @property
@@ -183,7 +182,7 @@ def upload_file_to_drive(file_content, filename, parent_folder_date, mimetype='a
 
     except Exception as e:
         error_msg = f"Lỗi khi upload file lên Drive: {str(e)}"
-        send_notification(error_msg, "error")
+        print(error_msg)
         return {
             'success': False,
             'error': error_msg
@@ -272,7 +271,7 @@ def upload_captcha_to_drive(captcha_content, filename=None, mimetype='image/png'
 
     except Exception as e:
         error_msg = f"Lỗi khi upload captcha lên Drive: {str(e)}"
-        send_notification(error_msg, "error")
+        print(error_msg)
         return {
             'success': False,
             'error': error_msg

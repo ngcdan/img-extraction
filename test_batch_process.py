@@ -4,6 +4,31 @@ import platform
 import argparse
 from receipt_fetcher import batch_process_files
 from utils import send_notification
+import tkinter as tk
+from tkinter import messagebox
+
+def show_message_dialog(message, title="Thông báo"):
+    """Hiển thị dialog thông báo trên cả Windows và macOS"""
+    try:
+        # Tạo root window
+        root = tk.Tk()
+        # Ẩn cửa sổ chính
+        root.withdraw()
+
+        # Đặt window lên trên cùng
+        root.lift()
+        root.attributes('-topmost', True)
+
+        # Hiển thị dialog
+        messagebox.showinfo(title, message)
+
+        # Dọn dẹp
+        root.destroy()
+    except Exception as e:
+        # Fallback về print nếu có lỗi với GUI
+        print(message)
+        if platform.system() == 'Windows':
+            input("Nhấn Enter để thoát...")
 
 def get_default_customs_dir():
     """Lấy đường dẫn thư mục customs mặc định trên Desktop"""
@@ -50,17 +75,21 @@ def main():
     else:
         # Process all PDFs in customs directory
         if not os.path.exists(args.data_dir):
-            print(f"Thư mục customs không tồn tại: {args.data_dir}")
-            print("Vui lòng tạo thư mục và đặt các file PDF vào đó.")
-            input("Nhấn Enter để thoát...")
+            show_message_dialog(
+                f"Thư mục customs không tồn tại: {args.data_dir}\n"
+                "Vui lòng tạo thư mục và đặt các file PDF vào đó.",
+                "Lỗi"
+            )
             sys.exit(1)
 
         files_to_process = [f for f in os.listdir(args.data_dir) if f.lower().endswith('.pdf')]
 
         if not files_to_process:
-            print(f"Không tìm thấy file PDF nào trong thư mục: {args.data_dir}")
-            print("Vui lòng đặt các file PDF cần xử lý vào thư mục này.")
-            input("Nhấn Enter để thoát...")
+            show_message_dialog(
+                f"Không tìm thấy file PDF nào trong thư mục: {args.data_dir}\n"
+                "Vui lòng đặt các file PDF cần xử lý vào thư mục này.",
+                "Cảnh báo"
+            )
             sys.exit(1)
 
     file_paths = [os.path.join(args.data_dir, filename) for filename in files_to_process]
@@ -74,18 +103,24 @@ def main():
         result = batch_process_files(file_paths)
 
         if result['success']:
-            print("\nKết quả xử lý:")
-            print(f"- Tổng số file: {result['stats']['total_files']}")
-            print(f"- Đã xử lý: {result['stats']['processed']}")
-            print(f"- Thành công: {result['stats']['sheet_success']}")
-            print(f"- Thất bại: {result['stats']['sheet_error']}")
+            summary = (
+                "\nKết quả xử lý:\n"
+                f"- Tổng số file: {result['stats']['total_files']}\n"
+                f"- Đã xử lý: {result['stats']['processed']}\n"
+                f"- Thành công: {result['stats']['sheet_success']}\n"
+                f"- Thất bại: {result['stats']['sheet_error']}"
+            )
+            print(summary)
+            show_message_dialog(summary, "Kết quả xử lý")
         else:
-            print(f"\nLỗi: {result['error']}")
+            error_msg = f"\nLỗi: {result['error']}"
+            print(error_msg)
+            show_message_dialog(error_msg, "Lỗi")
 
     except Exception as e:
-        print(f"Lỗi trong quá trình xử lý: {str(e)}")
-
-    input("\nNhấn Enter để thoát...")
+        error_msg = f"Lỗi trong quá trình xử lý: {str(e)}"
+        print(error_msg)
+        show_message_dialog(error_msg, "Lỗi")
 
 if __name__ == "__main__":
     main()

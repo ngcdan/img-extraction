@@ -635,7 +635,7 @@ def download_pdf(driver, link_element):
         row = link_element.find_element(By.XPATH, "./ancestor::tr")
         columns = row.find_elements(By.TAG_NAME, "td")
         custom_no = columns[4].text.strip()
-        ngay = columns[5].text.strip()
+        ngay = columns[9].text.strip()
         seriesNo = columns[7].text.strip()
         invoice_no = columns[8].text.strip()
         total = columns[11].text.strip()

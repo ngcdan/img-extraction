@@ -439,35 +439,35 @@ def process_download(driver, username, so_tk=None, download_status=None):
                     if download_status:
                         download_status['failed'] += 1
                     send_notification(f"Tải thất bại biên lai {i}/{total_links}", "error")
-                # time.sleep(1)
 
         if download_status:
             download_status['status'] = 'completed'
+            success_rate = (download_status['success'] / total_links) * 100 if total_links > 0 else 0
+            send_notification(
+                f"Hoàn tất tải xuống: {download_status['success']}/{total_links} biên lai thành công ({success_rate:.1f}%)",
+                "success" if success_rate > 90 else "warning"
+            )
 
-        success_rate = (download_status['success'] / total_links) * 100 if total_links > 0 else 0
-        send_notification(
-            f"Hoàn tất tải xuống: {download_status['success']}/{total_links} biên lai thành công ({success_rate:.1f}%)",
-            "success" if success_rate > 90 else "warning"
-        )
+        try:
+            # Lưu handle của tab hiện tại
+            current_handle = driver.current_window_handle
 
-        # Lưu handle của tất cả tabs
-        all_handles = driver.window_handles
-        localhost_handle = None
+            # Đóng tất cả các tab khác một cách an toàn
+            for handle in driver.window_handles[:]:
+                if handle != current_handle:
+                    try:
+                        driver.switch_to.window(handle)
+                        driver.close()
+                    except Exception:
+                        continue
 
-        # Tìm và đóng tab biên lai, đồng thời tìm tab localhost
-        for handle in all_handles[:]:  # Dùng copy của list để tránh lỗi khi xóa phần tử
-            driver.switch_to.window(handle)
-            current_url = driver.current_url
+            # Chuyển về tab chính
+            if current_handle in driver.window_handles:
+                driver.switch_to.window(current_handle)
+        except Exception as e:
+            print(f"Warning: Không thể đóng một số tab: {str(e)}")
+            # Không raise exception ở đây vì đây không phải lỗi nghiêm trọng
 
-            if "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu" in current_url:
-                driver.close()
-            elif "http://localhost:8080" in current_url:
-                localhost_handle = handle
-
-        # Chuyển về tab localhost nếu tìm thấy
-        if localhost_handle and localhost_handle in driver.window_handles:
-            driver.switch_to.window(localhost_handle)
-            send_notification("Đã trở về trang chủ", "info")
         return True
 
     except Exception as e:

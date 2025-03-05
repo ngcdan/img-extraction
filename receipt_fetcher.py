@@ -15,6 +15,7 @@ import time
 import os
 import base64
 import json
+import asyncio
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -364,57 +365,59 @@ def collect_captcha_if_login(driver):
 def process_download(driver, username, so_tk=None, download_status=None):
     """Xử lý quá trình tải biên lai"""
     try:
-        driver.execute_script("window.open('');")
+        # Mở tab mới và switch sang
+        driver.execute_script("window.open('about:blank', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
 
-        cookies_loaded = load_cookies(driver, username)
-        if cookies_loaded:
-            if check_login_status(driver):
+        # Tối ưu phần đăng nhập
+        async def handle_login():
+            cookies_loaded = load_cookies(driver, username)
+            if cookies_loaded:
+                driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
+                if not check_login_status(driver):
+                    return await perform_login()
                 print("Đã đăng nhập lại bằng cookies")
-            else:
-                driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
-                if not fill_login_info(driver, username, username):
-                    raise Exception("Không thể đăng nhập")
-                if not collect_captcha_if_login(driver):
-                    raise Exception("Đăng nhập không thành công sau 60 giây")
-                save_cookies(driver, username)
-        else:
+                return True
+            return await perform_login()
+
+        async def perform_login():
             driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
-            if fill_login_info(driver, username, username):
-                if not collect_captcha_if_login(driver):
-                    raise Exception("Đăng nhập không thành công sau 60 giây")
-                print("Đăng nhập thành công")
+            if not fill_login_info(driver, username, username):
+                return False
+            login_success = collect_captcha_if_login(driver)
+            if login_success:
                 save_cookies(driver, username)
-            else:
-                raise Exception("Không thể đăng nhập")
+            return login_success
 
+        # Sử dụng asyncio để xử lý đăng nhập
+        import asyncio
+        if not asyncio.run(handle_login()):
+            raise Exception("Không thể đăng nhập")
+
+        # Tối ưu phần tìm kiếm biên lai
         wait = WebDriverWait(driver, 20)
-        actions = ActionChains(driver)
-
         driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
-        print("Đang chuyển đến trang danh sách biên lai...")
 
         if so_tk:
-            try:
-                time.sleep(3)
-                so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
-                so_tk_input.clear()
-                so_tk_input.send_keys(so_tk)
-                print(f"Đã điền số tờ khai: {so_tk}")
-                time.sleep(1)
+            # Sử dụng JavaScript để điền form và submit
+            js_script = f"""
+                document.querySelector('input[name="SO_TK"]').value = '{so_tk}';
+                document.querySelector('button.btnSearch').click();
+            """
+            driver.execute_script(js_script)
+            time.sleep(2)  # Đợi ngắn hơn cho kết quả
 
-                search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                actions.move_to_element(search_button).perform()
-                time.sleep(0.5)
-                actions.click().perform()
-                print("Đã nhấp nút tìm kiếm")
+        # Tối ưu phần tải biên lai
+        async def download_receipts(links):
+            tasks = []
+            for i, link in enumerate(links, 1):
+                if 'Xem' in link.text:
+                    if download_status:
+                        download_status['current'] = i
+                    tasks.append(download_pdf_async(driver, link, i, total_links))
+            return await asyncio.gather(*tasks)
 
-                time.sleep(3)
-            except Exception as e:
-                print(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}")
-                raise
-
-        # Đợi và tìm các link biên lai
+        # Tìm tất cả links một lần
         links = wait.until(EC.presence_of_all_elements_located((
             By.CSS_SELECTOR,
             "a.color-blue.underline[href^='http://113.160.97.58:8224/Viewer/HoaDonViewer.aspx?mhd='][href$='iscd=1']"
@@ -428,46 +431,20 @@ def process_download(driver, username, so_tk=None, download_status=None):
         if download_status:
             download_status['total'] = total_links
 
-        for i, link in enumerate(links, 1):
-            if 'Xem' in link.text:
-                if download_status:
-                    download_status['current'] = i
-                print(f"Đang tải biên lai {i}/{total_links}")
+        # Tải song song các biên lai
+        results = asyncio.run(download_receipts(links))
 
-                if download_pdf(driver, link):
-                    if download_status:
-                        download_status['success'] += 1
-                    print(f"Tải thành công biên lai {i}/{total_links}")
-                else:
-                    if download_status:
-                        download_status['failed'] += 1
-                    print(f"Tải thất bại biên lai {i}/{total_links}")
-
+        # Cập nhật trạng thái
         if download_status:
+            download_status['success'] = sum(1 for r in results if r)
+            download_status['failed'] = sum(1 for r in results if not r)
             download_status['status'] = 'completed'
-            success_rate = (download_status['success'] / total_links) * 100 if total_links > 0 else 0
-            print(f"Hoàn tất tải xuống: {download_status['success']}/{total_links} biên lai thành công ({success_rate:.1f}%)")
 
-        try:
-            # Lưu handle của tab hiện tại
-            current_handle = driver.current_window_handle
+            success_rate = (download_status['success'] / total_links) * 100
+            print(f"Hoàn tất: {download_status['success']}/{total_links} biên lai ({success_rate:.1f}%)")
 
-            # Đóng tất cả các tab khác một cách an toàn
-            for handle in driver.window_handles[:]:
-                if handle != current_handle:
-                    try:
-                        driver.switch_to.window(handle)
-                        driver.close()
-                    except Exception:
-                        continue
-
-            # Chuyển về tab chính
-            if current_handle in driver.window_handles:
-                driver.switch_to.window(current_handle)
-        except Exception as e:
-            print(f"Warning: Không thể đóng một số tab: {str(e)}")
-            # Không raise exception ở đây vì đây không phải lỗi nghiêm trọng
-
+        # Đóng các tab phụ
+        cleanup_tabs(driver)  # Gọi hàm sync
         return True
 
     except Exception as e:
@@ -624,6 +601,29 @@ def save_captcha_and_label(driver, captcha_text):
     except Exception as e:
         print(f"Lỗi khi lưu captcha và label: {e}")
         return False
+
+async def download_pdf_async(driver, link, current, total):
+    """Tải PDF bất đồng bộ"""
+    try:
+        print(f"Đang tải biên lai {current}/{total}")
+        result = await asyncio.to_thread(download_pdf, driver, link)
+        print(f"{'Thành công' if result else 'Thất bại'} biên lai {current}/{total}")
+        return result
+    except Exception as e:
+        print(f"Lỗi tải biên lai {current}/{total}: {e}")
+        return False
+
+def cleanup_tabs(driver):
+    """Đóng các tab phụ an toàn - phiên bản sync"""
+    try:
+        current_handle = driver.current_window_handle
+        for handle in driver.window_handles[:]:
+            if handle != current_handle:
+                driver.switch_to.window(handle)
+                driver.close()
+        driver.switch_to.window(current_handle)
+    except Exception as e:
+        print(f"Warning: Không thể đóng một số tab: {e}")
 
 def download_pdf(driver, link_element):
     """Tải file PDF và lưu vào Google Drive"""

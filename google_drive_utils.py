@@ -39,19 +39,22 @@ class DriveService:
 
     def __init__(self):
         """Khởi tạo Drive service"""
-        # Thay đổi cách load file credentials
-        try:
-            # Thử load file gốc trong development
-            cred_path = 'driver-service-account.json'
-            if not os.path.exists(cred_path):
-                # Trong production, load file đã được rename
-                cred_path = get_resource_path('data1.bin')
+        if self._service is None:
+            try:
+                # Thử load file gốc trong development
+                cred_path = 'driver-service-account.json'
+                if not os.path.exists(cred_path):
+                    # Trong production, load file đã được rename
+                    cred_path = get_resource_path('data1.bin')
 
-            credentials = service_account.Credentials.from_service_account_file(
-                cred_path, scopes=SCOPES)
-            self.service = build('drive', 'v3', credentials=credentials)
-        except Exception as e:
-            raise Exception(f"Không thể khởi tạo Drive service: {str(e)}")
+                if not os.path.exists(cred_path):
+                    raise FileNotFoundError(f"Không tìm thấy file credentials tại {cred_path}")
+
+                credentials = service_account.Credentials.from_service_account_file(
+                    cred_path, scopes=SCOPES)
+                self._service = build('drive', 'v3', credentials=credentials)
+            except Exception as e:
+                raise Exception(f"Không thể khởi tạo Drive service: {str(e)}")
 
     @property
     def service(self):

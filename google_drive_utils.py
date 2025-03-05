@@ -3,6 +3,17 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 import io
 import os
+import sys
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 # Cấu hình chung
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
@@ -28,17 +39,19 @@ class DriveService:
 
     def __init__(self):
         """Khởi tạo Drive service"""
-        if self._service is None:
-            try:
-                if not os.path.exists(SERVICE_ACCOUNT_FILE):
-                    raise FileNotFoundError(f"Không tìm thấy file {SERVICE_ACCOUNT_FILE}")
+        # Thay đổi cách load file credentials
+        try:
+            # Thử load file gốc trong development
+            cred_path = 'driver-service-account.json'
+            if not os.path.exists(cred_path):
+                # Trong production, load file đã được rename
+                cred_path = get_resource_path('data1.bin')
 
-                credentials = service_account.Credentials.from_service_account_file(
-                    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-                self._service = build('drive', 'v3', credentials=credentials)
-            except Exception as e:
-                print(f"Lỗi khởi tạo Drive service: {str(e)}")
-                raise
+            credentials = service_account.Credentials.from_service_account_file(
+                cred_path, scopes=SCOPES)
+            self.service = build('drive', 'v3', credentials=credentials)
+        except Exception as e:
+            raise Exception(f"Không thể khởi tạo Drive service: {str(e)}")
 
     @property
     def service(self):

@@ -232,9 +232,9 @@ def initialize_chrome():
 
         # Xác định đường dẫn Chrome
         if platform.system() == 'Windows':
-            chrome_path = 'C:\\Program Files\\Google Chrome\\chrome.exe'
+            chrome_path = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
             if not os.path.exists(chrome_path):
-                chrome_path = 'C:\\Program Files (x86)\\Google Chrome\\chrome.exe'
+                chrome_path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
         else:  # macOS
             chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 

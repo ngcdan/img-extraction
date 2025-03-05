@@ -29,10 +29,7 @@ def clean_build():
 def collect_all_files():
     """Thu thập tất cả các file và thư mục cần thiết"""
     items_to_include = [
-        'templates',
-        'static',
         'cookies',
-        'downloads',
         '.env',
         'service-account-key.json',
         'test_batch_process.py',

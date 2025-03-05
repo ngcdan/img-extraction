@@ -56,7 +56,7 @@ def get_default_customs_dir():
 def main():
     parser = argparse.ArgumentParser(description='Process PDF files in batch')
     parser.add_argument('--data-dir', type=str, help='Directory containing PDF files',
-                       default=get_default_customs_dir())
+                      default=get_default_customs_dir())
     parser.add_argument('--files', type=str, nargs='+', help='List of PDF files to process')
     parser.add_argument('--quiet', action='store_true', help='Suppress notifications')
 

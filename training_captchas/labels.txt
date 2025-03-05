@@ -115,3 +115,4 @@ captcha_110.png	LTGWB
 captcha_111.png	DSVAK
 captcha_112.png	FYNNN
 captcha_113.png	LSCLF
+captcha_114.png	PJWED

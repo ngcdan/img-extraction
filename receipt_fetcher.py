@@ -15,8 +15,6 @@ import time
 import os
 import base64
 import json
-from utils import send_notification, get_download_directory
-from extract_info import update_last_row_sheet
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -599,33 +597,23 @@ def navigate_to_bien_lai_list(driver, so_tk=None):
         send_notification(f"Lỗi khi điều hướng và tìm kiếm biên lai: {str(e)}", "error")
         raise
 
-def get_next_captcha_index():
-    """Lấy index tiếp theo cho file captcha"""
-    if not os.path.exists("training_captchas"):
-        os.makedirs("training_captchas")
-        return 0
-
-    existing_files = [f for f in os.listdir("training_captchas") if f.startswith("captcha_") and f.endswith(".png")]
-    if not existing_files:
-        return 0
-
-    indices = [int(f.split('_')[1].split('.')[0]) for f in existing_files]
-    return max(indices) + 1
-
 def save_captcha_and_label(driver, captcha_text):
     """Lưu ảnh captcha và nhãn"""
     try:
-        index = get_next_captcha_index()
         captcha_element = driver.find_element(By.ID, "CaptchaImage")
-        image_path = f"training_captchas/captcha_{index}.png"
-        captcha_element.screenshot(image_path)
-        print(f"Đã lưu ảnh captcha: {image_path}")
+        png_data = captcha_element.screenshot_as_png
 
-        with open("training_captchas/labels.txt", "a") as f:
-            f.write(f"captcha_{index}.png\t{captcha_text}\n")
-        print(f"Đã lưu label: {captcha_text}")
+        from google_drive_utils import upload_captcha_to_drive
+        result = upload_captcha_to_drive(png_data)
 
-        return True
+        if result['success']:
+            print(f"Đã lưu captcha {result['filename']} với label: {captcha_text}")
+            # TODO: Lưu mapping captcha text vào file riêng nếu cần
+            return True
+        else:
+            print(f"Lỗi khi lưu captcha: {result.get('error')}")
+            return False
+
     except Exception as e:
         print(f"Lỗi khi lưu captcha và label: {e}")
         return False

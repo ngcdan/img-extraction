@@ -8,11 +8,17 @@ from utils import send_notification
 # Cấu hình chung
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 SERVICE_ACCOUNT_FILE = 'driver-service-account.json'
-ROOT_FOLDER_ID = '1FxafcnGt45hEpE5UHrjbQD4yjrEdmTGm'
+
+# Định nghĩa các ROOT_FOLDER_ID cho từng mục đích sử dụng
+DRIVE_FOLDERS = {
+    'CUSTOMS': '1FxafcnGt45hEpE5UHrjbQD4yjrEdmTGm',  # Folder gốc cho tờ khai hải quan
+    'CAPTCHAS': '1hM0qRY1NkyuXloxHMnCsqe_DD2__D-IW'  # Folder gốc cho captchas
+}
 
 class DriveService:
     _instance = None
     _service = None
+    _root_folder_id = None
 
     @classmethod
     def get_instance(cls):
@@ -42,8 +48,19 @@ class DriveService:
 
     @property
     def root_folder_id(self):
-        """Trả về ID folder gốc"""
-        return ROOT_FOLDER_ID
+        """Trả về root folder ID"""
+        return self._root_folder_id
+
+    @root_folder_id.setter
+    def root_folder_id(self, value):
+        """Set root folder ID"""
+        self._root_folder_id = value
+
+    def get_root_folder_id(self, folder_type='CUSTOMS'):
+        """Trả về ID folder gốc theo loại"""
+        folder_id = DRIVE_FOLDERS.get(folder_type)
+        self.root_folder_id = folder_id  # Cập nhật root_folder_id
+        return folder_id
 
 def create_drive_folder(service, parent_id, folder_name):
     """Tạo folder trong Google Drive, trả về folder ID"""
@@ -62,13 +79,21 @@ def create_drive_folder(service, parent_id, folder_name):
 def get_or_create_folder(service, parent_id, folder_name):
     """Tìm folder theo tên hoặc tạo mới nếu chưa tồn tại"""
     try:
-        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'"
-        if parent_id:
-            query += f" and '{parent_id}' in parents"
+        query = [
+            f"name = '{folder_name}'",
+            "mimeType = 'application/vnd.google-apps.folder'",
+            f"'{parent_id}' in parents",
+            "trashed = false"
+        ]
 
-        results = service.files().list(q=query, spaces='drive', fields='files(id)').execute()
+        results = service.files().list(
+            q=" and ".join(query),
+            spaces='drive',
+            fields='files(id, name)',
+            pageSize=1
+        ).execute()
+
         files = results.get('files', [])
-
         if files:
             return files[0]['id']
         return create_drive_folder(service, parent_id, folder_name)
@@ -76,7 +101,7 @@ def get_or_create_folder(service, parent_id, folder_name):
         print(f"Lỗi khi tìm/tạo folder: {e}")
         return None
 
-def upload_file_to_drive(file_content, filename, parent_folder_date, custom_no, mimetype='application/pdf'):
+def upload_file_to_drive(file_content, filename, parent_folder_date, custom_no, mimetype='application/pdf', folder_type='CUSTOMS'):
     """
     Upload file lên Google Drive với cấu trúc thư mục ngày/số_tờ_khai
 
@@ -86,23 +111,55 @@ def upload_file_to_drive(file_content, filename, parent_folder_date, custom_no, 
         parent_folder_date: Tên folder ngày (định dạng DDMMYYYY)
         custom_no: Số tờ khai hải quan
         mimetype: Loại file (mặc định là PDF)
+        folder_type: Loại folder gốc (mặc định là CUSTOMS)
     """
     try:
         drive_instance = DriveService.get_instance()
         service = drive_instance.service
-        root_id = drive_instance.root_folder_id
+        root_id = drive_instance.get_root_folder_id(folder_type)
 
-        # Tạo/lấy folder theo ngày
+        if not root_id:
+            raise Exception(f"Không tìm thấy folder gốc cho loại: {folder_type}")
+
+        # Nếu là CAPTCHAS, tạo folder "captchas"
+        if folder_type == 'CAPTCHAS':
+            captchas_folder_id = get_or_create_folder(service, root_id, 'captchas')
+            if not captchas_folder_id:
+                raise Exception("Không thể tạo/tìm folder captchas")
+
+            file_metadata = {
+                'name': filename,
+                'parents': [captchas_folder_id]
+            }
+
+            media = MediaIoBaseUpload(
+                io.BytesIO(file_content),
+                mimetype=mimetype,
+                resumable=True
+            )
+
+            file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink'
+            ).execute()
+
+            return {
+                'success': True,
+                'file_id': file.get('id'),
+                'web_view_link': file.get('webViewLink'),
+                'file_path': f"captchas/{filename}"
+            }
+
+        # Xử lý cho CUSTOMS như cũ
         date_folder_id = get_or_create_folder(service, root_id, parent_folder_date)
         if not date_folder_id:
             raise Exception("Không thể tạo/tìm folder ngày")
 
-        # Tạo/lấy folder số tờ khai
         custom_folder_id = get_or_create_folder(service, date_folder_id, custom_no)
         if not custom_folder_id:
             raise Exception("Không thể tạo/tìm folder số tờ khai")
 
-        # Upload file
         file_metadata = {
             'name': filename,
             'parents': [custom_folder_id]
@@ -126,12 +183,100 @@ def upload_file_to_drive(file_content, filename, parent_folder_date, custom_no, 
             'success': True,
             'file_id': file.get('id'),
             'web_view_link': file.get('webViewLink'),
-            'file_path': file_path,  # Thêm file_path
-            'folder_path': file_path  # Giữ folder_path để tương thích ngược
+            'file_path': file_path
         }
 
     except Exception as e:
         error_msg = f"Lỗi khi upload file lên Drive: {str(e)}"
+        send_notification(error_msg, "error")
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def get_next_captcha_index_from_drive(service, root_folder_id):
+    """Lấy index tiếp theo cho file captcha từ Google Drive"""
+    try:
+        query = [
+            f"'{root_folder_id}' in parents",
+            "name contains 'captcha_'",
+            "name contains '.png'",
+            "trashed = false"
+        ]
+
+        results = service.files().list(
+            q=" and ".join(query),
+            spaces='drive',
+            fields='files(name)',
+            orderBy='name desc',
+            pageSize=1000
+        ).execute()
+
+        files = results.get('files', [])
+        if not files:
+            return 0
+
+        indices = []
+        for file in files:
+            try:
+                index = int(file['name'].split('_')[1].split('.')[0])
+                indices.append(index)
+            except (IndexError, ValueError):
+                continue
+
+        return max(indices) + 1 if indices else 0
+
+    except Exception as e:
+        print(f"Lỗi khi lấy index captcha: {e}")
+        return 0
+
+def upload_captcha_to_drive(captcha_content, filename=None, mimetype='image/png'):
+    """
+    Upload captcha lên Google Drive với tên file tự động tăng
+
+    Args:
+        captcha_content: Nội dung file captcha dạng bytes
+        filename: Tên file (nếu None sẽ tự động tạo)
+        mimetype: Loại file (mặc định là image/png)
+    """
+    try:
+        drive_instance = DriveService.get_instance()
+        service = drive_instance.service
+        root_id = drive_instance.get_root_folder_id('CAPTCHAS')
+
+        if not root_id:
+            raise Exception("Không tìm thấy folder gốc cho captchas")
+
+        if filename is None:
+            next_index = get_next_captcha_index_from_drive(service, root_id)
+            filename = f"captcha_{next_index:03d}.png"
+
+        file_metadata = {
+            'name': filename,
+            'parents': [root_id]
+        }
+
+        media = MediaIoBaseUpload(
+            io.BytesIO(captcha_content),
+            mimetype=mimetype,
+            resumable=True
+        )
+
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink'
+        ).execute()
+
+        return {
+            'success': True,
+            'file_id': file.get('id'),
+            'web_view_link': file.get('webViewLink'),
+            'filename': filename
+        }
+
+    except Exception as e:
+        error_msg = f"Lỗi khi upload captcha lên Drive: {str(e)}"
         send_notification(error_msg, "error")
         return {
             'success': False,

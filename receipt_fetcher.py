@@ -373,19 +373,14 @@ def collect_captcha_if_login(driver):
 def process_download(driver, username, so_tk=None, download_status=None):
     """Xử lý quá trình tải biên lai"""
     try:
-        # Mở tab mới
         driver.execute_script("window.open('');")
-        # Chuyển đến tab mới (tab cuối cùng trong danh sách)
         driver.switch_to.window(driver.window_handles[-1])
 
-        # Thử dùng cookies đã lưu
         cookies_loaded = load_cookies(driver, username)
         if cookies_loaded:
-            # Kiểm tra trạng thái đăng nhập
             if check_login_status(driver):
-                send_notification("Đã đăng nhập lại bằng cookies", "success")
+                print("Đã đăng nhập lại bằng cookies")
             else:
-                # Nếu cookies không còn hiệu lực, đăng nhập lại
                 driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
                 if not fill_login_info(driver, username, username):
                     raise Exception("Không thể đăng nhập")
@@ -393,43 +388,39 @@ def process_download(driver, username, so_tk=None, download_status=None):
                     raise Exception("Đăng nhập không thành công sau 60 giây")
                 save_cookies(driver, username)
         else:
-            # Đăng nhập thông thường nếu không có cookies
             driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
             if fill_login_info(driver, username, username):
                 if not collect_captcha_if_login(driver):
                     raise Exception("Đăng nhập không thành công sau 60 giây")
-                send_notification("Đăng nhập thành công", "success")
+                print("Đăng nhập thành công")
                 save_cookies(driver, username)
             else:
                 raise Exception("Không thể đăng nhập")
 
-        # Truy cập trang danh sách biên lai
         wait = WebDriverWait(driver, 20)
         actions = ActionChains(driver)
 
         driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
-        send_notification("Đang chuyển đến trang danh sách biên lai...", "info")
+        print("Đang chuyển đến trang danh sách biên lai...")
 
-        # Nếu có số tờ khai, thực hiện tìm kiếm
         if so_tk:
             try:
-                time.sleep(3)  # Đợi trang load xong
+                time.sleep(3)
                 so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
                 so_tk_input.clear()
                 so_tk_input.send_keys(so_tk)
-                send_notification(f"Đã điền số tờ khai: {so_tk}")
-                time.sleep(1)  # Đợi trang load xong
+                print(f"Đã điền số tờ khai: {so_tk}")
+                time.sleep(1)
 
                 search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                # Hover và click vào nút tìm kiếm
                 actions.move_to_element(search_button).perform()
                 time.sleep(0.5)
                 actions.click().perform()
-                send_notification("Đã nhấp nút tìm kiếm")
+                print("Đã nhấp nút tìm kiếm")
 
-                time.sleep(3)  # Đợi kết quả tìm kiếm
+                time.sleep(3)
             except Exception as e:
-                send_notification(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}", "error")
+                print(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}")
                 raise
 
         # Đợi và tìm các link biên lai
@@ -439,7 +430,7 @@ def process_download(driver, username, so_tk=None, download_status=None):
         )))
 
         if not links:
-            send_notification("Không tìm thấy biên lai nào", "warning")
+            print("Không tìm thấy biên lai nào")
             return False
 
         total_links = len(links)
@@ -450,24 +441,21 @@ def process_download(driver, username, so_tk=None, download_status=None):
             if 'Xem' in link.text:
                 if download_status:
                     download_status['current'] = i
-                send_notification(f"Đang tải biên lai {i}/{total_links}", "info")
+                print(f"Đang tải biên lai {i}/{total_links}")
 
                 if download_pdf(driver, link):
                     if download_status:
                         download_status['success'] += 1
-                    send_notification(f"Tải thành công biên lai {i}/{total_links}", "success")
+                    print(f"Tải thành công biên lai {i}/{total_links}")
                 else:
                     if download_status:
                         download_status['failed'] += 1
-                    send_notification(f"Tải thất bại biên lai {i}/{total_links}", "error")
+                    print(f"Tải thất bại biên lai {i}/{total_links}")
 
         if download_status:
             download_status['status'] = 'completed'
             success_rate = (download_status['success'] / total_links) * 100 if total_links > 0 else 0
-            send_notification(
-                f"Hoàn tất tải xuống: {download_status['success']}/{total_links} biên lai thành công ({success_rate:.1f}%)",
-                "success" if success_rate > 90 else "warning"
-            )
+            print(f"Hoàn tất tải xuống: {download_status['success']}/{total_links} biên lai thành công ({success_rate:.1f}%)")
 
         try:
             # Lưu handle của tab hiện tại
@@ -492,9 +480,7 @@ def process_download(driver, username, so_tk=None, download_status=None):
         return True
 
     except Exception as e:
-        error_msg = f"Lỗi: {str(e)}"
-        print(error_msg)
-        send_notification(error_msg, "error")
+        print(f"Lỗi: {str(e)}")
         if download_status:
             download_status['status'] = 'error'
         return False

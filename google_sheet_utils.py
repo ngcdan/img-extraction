@@ -99,7 +99,7 @@ def append_to_google_sheet(extracted_info):
         # Validate input data
         line_items = extracted_info.get('line_items', [])
         if not line_items:
-            send_notification("Không có thông tin container để thêm vào Sheet", "warning")
+            print("Không có thông tin container để thêm vào Sheet")
             return False
 
         # Lấy số dòng hiện tại
@@ -110,7 +110,7 @@ def append_to_google_sheet(extracted_info):
             ).execute()
             current_row = len(result.get('values', []))
         except HttpError as e:
-            send_notification(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}", "error")
+            print(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}")
             return False
 
         # Chuẩn bị dữ liệu
@@ -123,14 +123,14 @@ def append_to_google_sheet(extracted_info):
         # Thực hiện append với retry
         try:
             execute_append(sheet, values)
-            send_notification(f"Đã thêm {len(line_items)} dòng vào Google Sheet", "success")
+            print(f"Đã thêm {len(line_items)} dòng vào Google Sheet")
             return True
         except Exception as e:
-            send_notification(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}", "error")
+            print(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}")
             return False
 
     except Exception as e:
-        send_notification(f"Lỗi không mong đợi: {str(e)}", "error")
+        print(f"Lỗi không mong đợi: {str(e)}")
         return False
 
 def append_to_google_sheet_new(extracted_info):
@@ -252,10 +252,9 @@ def update_invoice_info(invoice_info):
                     break
 
         if not target_row:
-            send_notification(
+            print(
                 f"Không tìm thấy dòng phù hợp cho số tờ khai {invoice_info['custom_no']} "
-                "hoặc tất cả các dòng đã có thông tin invoice",
-                "warning"
+                "hoặc tất cả các dòng đã có thông tin invoice"
             )
             return False
 
@@ -291,9 +290,9 @@ def update_invoice_info(invoice_info):
             body=amount_body
         ).execute()
 
-        send_notification("Đã cập nhật thông tin invoice thành công", "success")
+        print("Đã cập nhật thông tin invoice thành công")
         return True
 
     except Exception as e:
-        send_notification(f"Lỗi khi cập nhật thông tin invoice: {str(e)}", "error")
+        print(f"Lỗi khi cập nhật thông tin invoice: {str(e)}")
         return False

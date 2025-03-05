@@ -1,12 +1,22 @@
 import os
+import sys
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 # Cấu hình chung
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SERVICE_ACCOUNT_FILE = './service-account-key.json'
+SERVICE_ACCOUNT_FILE = 'service-account-key.json'
 SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
 RANGE_NAME = 'main!A:V'
 
@@ -25,11 +35,17 @@ class SheetService:
         """Khởi tạo Sheet service"""
         if self._service is None:
             try:
-                if not os.path.exists(SERVICE_ACCOUNT_FILE):
-                    raise FileNotFoundError(f"Không tìm thấy file {SERVICE_ACCOUNT_FILE}")
+                # Thử load file gốc trong development
+                cred_path = SERVICE_ACCOUNT_FILE
+                if not os.path.exists(cred_path):
+                    # Trong production, load file đã được rename
+                    cred_path = get_resource_path('data2.bin')
+
+                if not os.path.exists(cred_path):
+                    raise FileNotFoundError(f"Không tìm thấy file credentials")
 
                 credentials = service_account.Credentials.from_service_account_file(
-                    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+                    cred_path, scopes=SCOPES)
                 self._service = build('sheets', 'v4', credentials=credentials)
             except Exception as e:
                 print(f"Lỗi khởi tạo Sheet service: {str(e)}")

@@ -337,14 +337,19 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                                 # Đợi với timeout 30 giây nhưng phản ứng nhanh khi có kết quả
                                 start_time = time.time()
+                                search_completed = False
                                 while time.time() - start_time < 30:
                                     if is_search_complete():
                                         print(f"Tìm kiếm hoàn tất sau {time.time() - start_time:.1f} giây")
                                         rows = driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")
-                                        return True
+                                        search_completed = True
+                                        break
                                     time.sleep(0.1)  # Check mỗi 100ms
 
-                                raise TimeoutException("Timeout chờ kết quả tìm kiếm")
+                                if search_completed:
+                                    break  # Thoát khỏi vòng lặp retry
+                                else:
+                                    raise TimeoutException("Timeout chờ kết quả tìm kiếm")
 
                             except Exception as e:
                                 retry_count += 1

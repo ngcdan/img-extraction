@@ -97,9 +97,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                             'status': 'error',
                             'error': upload_result.get('error', 'Unknown error')
                         })
-
                     extracted_results.append(header_info)
-
             except Exception as e:
                 print(f"Lỗi xử lý file {file_path}: {str(e)}")
                 continue
@@ -222,6 +220,257 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             'success': False,
             'error': str(e)
         }
+
+def process_download(driver, username, so_tk_list=None, download_status=None):
+    try:
+        session = requests.Session()
+        session.verify = False
+
+        # Mở tab mới và login như cũ
+        driver.execute_script("window.open('about:blank', '_blank');")
+        driver.switch_to.window(driver.window_handles[-1])
+
+        def perform_login():
+            driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
+            if not fill_login_info(driver, username, username):
+                return False
+            login_success = collect_captcha_if_login(driver)
+            if login_success:
+                save_cookies(driver, username)
+            return login_success
+
+        def handle_login():
+            cookies_loaded = load_cookies(driver, username)
+            if cookies_loaded:
+                driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
+                if not check_login_status(driver):
+                    return perform_login()
+                print("Đã đăng nhập lại bằng cookies")
+                return True
+            return perform_login()
+
+        if not handle_login():
+            raise Exception("Không thể đăng nhập")
+
+        # Truy cập trang tra cứu để lấy form token
+        driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
+        time.sleep(2)
+
+        # Lấy form token từ trang
+        request_token_form = driver.find_element(By.NAME, "__RequestVerificationToken").get_attribute("value")
+        print("\nForm token:", request_token_form)
+
+        # Lấy cookies từ browser
+        browser_cookies = driver.get_cookies()
+
+        # Tìm token trong cookies
+        request_token_cookie = None
+        session_token = None
+        asp_session_id = None
+
+        for cookie in browser_cookies:
+            if cookie['name'] == '__RequestVerificationToken':
+                request_token_cookie = cookie['value']
+            elif cookie['name'] == 'SessionToken':
+                session_token = cookie['value']
+            elif cookie['name'] == 'ASP.NET_SessionId':
+                asp_session_id = cookie['value']
+
+        print("\nCookies từ browser:")
+        print("Request Token Cookie:", request_token_cookie)
+        print("Session Token:", session_token)
+        print("ASP.NET Session ID:", asp_session_id)
+
+        # Chuẩn bị headers và cookies
+        headers = {
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate",
+            "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Host": "thuphi.haiphong.gov.vn:8222",
+            "Origin": "http://thuphi.haiphong.gov.vn:8222",
+            "Pragma": "no-cache",
+            "Referer": "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu",
+            "X-Requested-With": "XMLHttpRequest",
+            "__RequestVerificationToken": request_token_form  # Sử dụng form token
+        }
+
+        cookies = {
+            "SessionToken": session_token,
+            "ASP.NET_SessionId": asp_session_id,
+            "__RequestVerificationToken": request_token_cookie
+        }
+
+        print("\nHeaders được chuẩn bị:", json.dumps(headers, indent=2))
+        print("\nCookies được chuẩn bị:", json.dumps(cookies, indent=2))
+
+        url = "http://thuphi.haiphong.gov.vn:8222/DBienLaiThuPhi_TraCuu/GetListEinvoiceByMaDN/"
+
+        if so_tk_list:
+            for idx, so_tk in enumerate(so_tk_list, 1):
+                try:
+                    print(f"\nĐang xử lý số tờ khai {idx}/{len(so_tk_list)}: {so_tk}")
+
+                    data = {
+                        "EinvoiceFrom": "0",
+                        "tu_ngay": "01/01/2024",
+                        "den_ngay": "31/12/2024",
+                        "ma_dn": username,
+                        "so_tokhai": so_tk,
+                        "pageNum": "1",
+                        "__RequestVerificationToken": request_token_form
+                    }
+
+                    print("\nData request:", json.dumps(data, indent=2))
+
+                    response = session.post(url, headers=headers, cookies=cookies, data=data)
+
+                    print("\nStatus code:", response.status_code)
+                    if response.status_code == 200:
+                        result = response.json()
+                        print("Response:", json.dumps(result, indent=2, ensure_ascii=False))
+
+                        if result.get("code") == 1 and result.get("DANHSACH"):
+                            print(f"\nTìm thấy {len(result['DANHSACH'])} biên lai")
+                            for receipt in result['DANHSACH']:
+                                # Chuyển đổi timestamp thành định dạng ngày
+                                ngay_tk_str = receipt.get('NgayTK', '')
+                                if ngay_tk_str:
+                                    # Trích xuất timestamp từ chuỗi "/Date(1740762000000)/"
+                                    timestamp = int(ngay_tk_str.split('(')[1].split(')')[0])
+                                    # Chuyển timestamp (milliseconds) sang datetime
+                                    ngay_tk = datetime.fromtimestamp(timestamp/1000)
+                                    # Format ngày thành dd/mm/yyyy
+                                    ngay_tk = ngay_tk.strftime('%d/%m/%Y')
+                                else:
+                                    ngay_tk = ''
+
+                                invoice_info = {
+                                    'custom_no': receipt.get('SoTK', ''),
+                                    'invoice_no': str(receipt.get('SoBienLai', '')),
+                                    'seriesNo': receipt.get('MauBienLai', ''),
+                                    'ngay': ngay_tk,
+                                    'total_amount': receipt.get('TongTien', 0),
+                                    'drive_link': receipt.get('InvoiceKey', '')
+                                }
+
+                                print(f"Xử lý biên lai: {json.dumps(invoice_info, indent=2, ensure_ascii=False)}")
+
+                                # Tạo URL xem biên lai
+                                invoice_url = f"http://thuphi.haiphong.gov.vn:8222/Viewer/HoaDonViewer.aspx?mhd={invoice_info['drive_link']}"
+
+                                # Mở tab mới để tải PDF
+                                driver.execute_script(f"window.open('{invoice_url}', '_blank');")
+
+                                driver.switch_to.window(driver.window_handles[-1])
+                                time.sleep(2)
+
+                                print_options = {
+                                    'landscape': False,
+                                    'displayHeaderFooter': False,
+                                    'printBackground': True,
+                                    'preferCSSPageSize': True,
+                                }
+                                pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
+                                pdf_data = base64.b64decode(pdf['data'])
+
+                                # Upload lên Drive
+                                upload_result = upload_file_to_drive(
+                                    file_content=pdf_data,
+                                    filename=f"CSHT_{invoice_info['invoice_no']}.pdf",
+                                    parent_folder_date=ngay_tk)
+
+                                if not upload_result['success']:
+                                    raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
+
+                                print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
+
+                                # Cập nhật thông tin vào Google Sheet
+                                if update_invoice_info(invoice_info):
+                                    print(f"Đã cập nhật thông tin biên lai {invoice_info['invoice_no']} vào Google Sheet")
+                                else:
+                                    print(f"Lỗi khi cập nhật biên lai {invoice_info['invoice_no']} vào Google Sheet")
+
+                        else:
+                            print(f"Không tìm thấy biên lai cho số tờ khai {so_tk}")
+                    else:
+                        print(f"Request thất bại với mã lỗi {response.status_code}")
+                        print("Response:", response.text)
+
+                except Exception as e:
+                    print(f"Lỗi khi xử lý số tờ khai {so_tk}: {str(e)}")
+                    continue
+
+        driver.close()
+        driver.switch_to.window(driver.window_handles[0])
+        return True
+
+    except Exception as e:
+        print(f"Lỗi: {str(e)}")
+        if download_status:
+            download_status['status'] = 'error'
+        return False
+
+    finally:
+        if 'session' in locals():
+            session.close()
+
+def fill_login_info(driver, username, password, max_retries=3):
+    """Điền thông tin đăng nhập với retry và explicit wait"""
+    wait = WebDriverWait(driver, 20)  # Đợi tối đa 10 giây
+    retry_count = 0
+    login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
+
+    while retry_count < max_retries:
+        try:
+            # Kiểm tra URL hiện tại
+            current_url = driver.current_url
+            if current_url != login_url:
+                print(f"URL hiện tại không phải trang đăng nhập: {current_url}")
+                # Tìm tab có URL đăng nhập
+                login_tab_found = False
+                for handle in driver.window_handles:
+                    driver.switch_to.window(handle)
+                    if driver.current_url == login_url:
+                        print("Đã tìm thấy tab đăng nhập")
+                        login_tab_found = True
+                        break
+
+                if not login_tab_found:
+                    print("Không tìm thấy tab đăng nhập")
+                    return False
+
+            # Đợi cho đến khi form login xuất hiện
+            wait.until(EC.presence_of_element_located((By.ID, "form-username")))
+            wait.until(EC.element_to_be_clickable((By.ID, "form-username")))
+
+            # Tìm và điền username
+            username_input = driver.find_element(By.ID, "form-username")
+            username_input.clear()
+            username_input.send_keys(username)
+            print("Đã điền username")
+
+            # Đợi và điền password
+            wait.until(EC.presence_of_element_located((By.ID, "form-password")))
+            password_input = driver.find_element(By.ID, "form-password")
+            password_input.clear()
+            password_input.send_keys(password)
+            print("Đã điền password")
+
+            return True
+
+        except (TimeoutException, NoSuchElementException) as e:
+            retry_count += 1
+            print(f"Lần thử {retry_count}: Không tìm thấy form đăng nhập. Đang thử lại...")
+
+            if retry_count < max_retries:
+                driver.get(login_url)  # Refresh về trang đăng nhập
+                time.sleep(2)
+            else:
+                print(f"Lỗi sau {max_retries} lần thử: {str(e)}")
+                raise Exception(f"Không thể điền thông tin đăng nhập sau {max_retries} lần thử")
 
 def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
@@ -375,369 +624,6 @@ def collect_captcha_if_login(driver):
         print(f"Lỗi khi thu thập captcha: {e}")
         return False
 
-def process_download(driver, username, so_tk_list=None, download_status=None):
-    """
-    Xử lý quá trình tải biên lai
-    Args:
-        driver: WebDriver instance
-        username: Tên đăng nhập
-        so_tk_list: List số tờ khai (optional)
-        download_status: Dict để theo dõi trạng thái
-    """
-    try:
-        # Tạo session với SSL verification disabled
-        import requests
-        session = requests.Session()
-        session.verify = False
-
-        # Mở tab mới và switch sang
-        driver.execute_script("window.open('about:blank', '_blank');")
-        driver.switch_to.window(driver.window_handles[-1])
-
-        # Xử lý đăng nhập
-        def handle_login():
-            cookies_loaded = load_cookies(driver, username)
-            if cookies_loaded:
-                driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
-                if not check_login_status(driver):
-                    return perform_login()
-                print("Đã đăng nhập lại bằng cookies")
-                return True
-            return perform_login()
-
-        def perform_login():
-            driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
-            if not fill_login_info(driver, username, username):
-                return False
-            login_success = collect_captcha_if_login(driver)
-            if login_success:
-                save_cookies(driver, username)
-            return login_success
-
-        # Đăng nhập
-        if not handle_login():
-            raise Exception("Không thể đăng nhập")
-
-        wait = WebDriverWait(driver, 20)
-        total_success = 0
-
-        # Xử lý từng số tờ khai
-        if so_tk_list:
-            for idx, so_tk in enumerate(so_tk_list, 1):
-                print(f"Đang xử lý số tờ khai {idx}/{len(so_tk_list)}: {so_tk}")
-
-                try:
-                    # Truy cập trang tìm kiếm
-                    driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
-                    time.sleep(1)
-
-                    # Điền số tờ khai và tìm kiếm
-                    so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
-                    so_tk_input.clear()
-                    so_tk_input.send_keys(so_tk)
-
-                    # Đợi preloader biến mất nếu có
-                    try:
-                        preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-                        wait.until(EC.invisibility_of_element(preloader))
-                    except:
-                        pass  # Bỏ qua nếu không tìm thấy preloader
-
-                    # Tìm và click nút tìm kiếm với retry
-                    max_retries = 3
-                    retry_count = 0
-                    while retry_count < max_retries:
-                        try:
-                            search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                            # Scroll đến nút
-                            driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
-                            time.sleep(0.5)
-                            # Thử click bằng JavaScript
-                            driver.execute_script("arguments[0].click();", search_button)
-                            print("Đã nhấp nút tìm kiếm")
-                            break
-                        except Exception as e:
-                            retry_count += 1
-                            print(f"Lần thử {retry_count}: Không thể click nút tìm kiếm. Đang thử lại...")
-                            time.sleep(1)
-                            if retry_count == max_retries:
-                                raise Exception(f"Không thể click nút tìm kiếm sau {max_retries} lần thử: {str(e)}")
-
-                    # Đợi preloader biến mất sau khi click
-                    time.sleep(1)
-                    try:
-                        preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-                        wait.until(EC.invisibility_of_element(preloader))
-                    except:
-                        pass
-
-                    # Tìm links cho số tờ khai hiện tại
-                    current_links = wait.until(EC.presence_of_all_elements_located((
-                        By.CSS_SELECTOR,
-                        "a.color-blue.underline[href^='http://113.160.97.58:8224/Viewer/HoaDonViewer.aspx?mhd='][href$='iscd=1']"
-                    )))
-
-                    if current_links:
-                        print(f"Tìm thấy {len(current_links)} biên lai cho số tờ khai {so_tk}")
-
-                        # Download từng biên lai
-                        success_count = 0
-                        for i, link in enumerate(current_links, 1):
-                            if 'Xem' in link.text:
-                                try:
-                                    print(f"Đang tải biên lai {i}/{len(current_links)}")
-                                    if download_pdf(driver, link, session):
-                                        success_count += 1
-                                        print(f"Thành công biên lai {i}/{len(current_links)}")
-                                    else:
-                                        print(f"Thất bại biên lai {i}/{len(current_links)}")
-                                except Exception as e:
-                                    print(f"Lỗi khi tải biên lai {i}/{len(current_links)}: {e}")
-                                    continue
-
-                        total_success += success_count
-                        print(f"Đã tải xong {success_count}/{len(current_links)} biên lai cho số tờ khai {so_tk}")
-                    else:
-                        print(f"Không tìm thấy biên lai nào cho số tờ khai {so_tk}")
-
-                except Exception as e:
-                    print(f"Lỗi khi xử lý số tờ khai {so_tk}: {str(e)}")
-                    continue
-
-                finally:
-                    # Dọn dẹp memory sau mỗi lần xử lý
-                    import gc
-                    gc.collect()
-
-        # Cập nhật trạng thái
-        if download_status:
-            download_status['success'] = total_success
-            download_status['status'] = 'completed'
-
-        cleanup_tabs(driver)
-        return True
-
-    except Exception as e:
-        print(f"Lỗi: {str(e)}")
-        if download_status:
-            download_status['status'] = 'error'
-        return False
-
-    finally:
-        # Đảm bảo dọn dẹp resources
-        if 'session' in locals():
-            session.close()
-
-
-def download_pdf(driver, link_element, session):
-    """Tải file PDF và lưu vào Google Drive"""
-    try:
-        href = link_element.get_attribute('href')
-        current_handle = driver.current_window_handle
-
-        # Lấy thông tin từ bảng
-        row = link_element.find_element(By.XPATH, "./ancestor::tr")
-        columns = row.find_elements(By.TAG_NAME, "td")
-        custom_no = columns[4].text.strip()
-        ngay = columns[9].text.strip()
-        seriesNo = columns[7].text.strip()
-        invoice_no = columns[8].text.strip()
-        total = columns[11].text.strip()
-        total_amount = convert_price_to_number(total)
-
-        # Format ngày và tên file
-        ngay_formatted = ngay.replace('/', '')
-        filename = f"CSHT_{invoice_no}.pdf"
-
-        # Kiểm tra file đã tồn tại trong Drive chưa
-        drive_instance = DriveService.get_instance()
-        service = drive_instance.service
-        root_folder_id = drive_instance.root_folder_id
-
-        # Tìm file trong folder ngày
-        date_query = f"name = '{ngay_formatted}' and mimeType = 'application/vnd.google-apps.folder' and '{root_folder_id}' in parents"
-        date_results = service.files().list(q=date_query, spaces='drive', fields='files(id)').execute()
-
-        if date_results.get('files'):
-            date_folder_id = date_results['files'][0]['id']
-            file_query = f"name = '{filename}' and mimeType = 'application/pdf' and '{date_folder_id}' in parents"
-            file_results = service.files().list(q=file_query, spaces='drive', fields='files(id)').execute()
-
-            if file_results.get('files'):
-                print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
-                return True
-
-        # Nếu file chưa tồn tại, tiếp tục tải
-        driver.execute_script(f"window.open('{href}', '_blank');")
-        driver.switch_to.window(driver.window_handles[-1])
-        time.sleep(2)  # Đợi trang load
-
-        print_options = {
-            'landscape': False,
-            'displayHeaderFooter': False,
-            'printBackground': True,
-            'preferCSSPageSize': True,
-        }
-        pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
-        pdf_data = base64.b64decode(pdf['data'])
-
-        # Upload lên Drive
-        upload_result = upload_file_to_drive(
-            file_content=pdf_data,
-            filename=filename,
-            parent_folder_date=ngay_formatted)
-
-        if not upload_result['success']:
-            raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
-
-        print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
-
-        invoice_info = {
-            'custom_no': custom_no,
-            'invoice_no': invoice_no,
-            'seriesNo': seriesNo,
-            'ngay': ngay,
-            'total_amount': total_amount,
-            'drive_link': upload_result['web_view_link']  # Thêm link drive vào thông tin
-        }
-
-        try:
-            if update_invoice_info(invoice_info):
-                print("Đã cập nhật thông tin vào Google Sheet")
-            else:
-                print("Lỗi khi cập nhật Google Sheet")
-        except Exception as e:
-            print(f"Lỗi khi cập nhật Google Sheet: {str(e)}")
-            # Không raise exception ở đây để không ảnh hưởng đến quá trình tải file
-
-        driver.close()
-        driver.switch_to.window(current_handle)
-        return True
-
-    except Exception as e:
-        print(f"Lỗi khi tải PDF: {e}")
-        return False
-
-def fill_login_info(driver, username, password, max_retries=3):
-    """Điền thông tin đăng nhập với retry và explicit wait"""
-    wait = WebDriverWait(driver, 20)  # Đợi tối đa 10 giây
-    retry_count = 0
-    login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
-
-    while retry_count < max_retries:
-        try:
-            # Kiểm tra URL hiện tại
-            current_url = driver.current_url
-            if current_url != login_url:
-                print(f"URL hiện tại không phải trang đăng nhập: {current_url}")
-                # Tìm tab có URL đăng nhập
-                login_tab_found = False
-                for handle in driver.window_handles:
-                    driver.switch_to.window(handle)
-                    if driver.current_url == login_url:
-                        print("Đã tìm thấy tab đăng nhập")
-                        login_tab_found = True
-                        break
-
-                if not login_tab_found:
-                    print("Không tìm thấy tab đăng nhập")
-                    return False
-
-            # Đợi cho đến khi form login xuất hiện
-            wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-            wait.until(EC.element_to_be_clickable((By.ID, "form-username")))
-
-            # Tìm và điền username
-            username_input = driver.find_element(By.ID, "form-username")
-            username_input.clear()
-            username_input.send_keys(username)
-            print("Đã điền username")
-
-            # Đợi và điền password
-            wait.until(EC.presence_of_element_located((By.ID, "form-password")))
-            password_input = driver.find_element(By.ID, "form-password")
-            password_input.clear()
-            password_input.send_keys(password)
-            print("Đã điền password")
-
-            return True
-
-        except (TimeoutException, NoSuchElementException) as e:
-            retry_count += 1
-            print(f"Lần thử {retry_count}: Không tìm thấy form đăng nhập. Đang thử lại...")
-
-            if retry_count < max_retries:
-                driver.get(login_url)  # Refresh về trang đăng nhập
-                time.sleep(2)
-            else:
-                print(f"Lỗi sau {max_retries} lần thử: {str(e)}")
-                raise Exception(f"Không thể điền thông tin đăng nhập sau {max_retries} lần thử")
-
-def navigate_to_bien_lai_list(driver, so_tk=None):
-    """Điều hướng đến trang danh sách biên lai"""
-    try:
-        wait = WebDriverWait(driver, 15)
-        actions = ActionChains(driver)
-
-        # Tìm và hover vào menu Tra cứu
-        tra_cuu_link = wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//a[.//p[contains(text(), 'Tra cứu')]]")
-        ))
-        print("Đã tìm thấy mục 'Tra cứu', chuẩn bị hover...")
-
-        # Hover vào menu Tra cứu
-        actions.move_to_element(tra_cuu_link).perform()
-        time.sleep(1)  # Đợi animation hover
-        print("Đã hover vào 'Tra cứu'")
-
-        # Click vào menu Tra cứu
-        actions.click().perform()
-        print("Đã nhấp vào 'Tra cứu'")
-
-        # Đợi và mở rộng menu con
-        menu_treeview = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "ul.nav-treeview")))
-        driver.execute_script("arguments[0].style.display = 'block'; arguments[0].classList.add('show');", menu_treeview)
-        print("Đã hiển thị menu con")
-        time.sleep(1)  # Đợi animation menu
-
-        # Tìm link biên lai
-        bien_lai_link = wait.until(EC.element_to_be_clickable(
-            (By.CSS_SELECTOR, "a[href='/danh-sach-tra-cuu-bien-lai-dien-tu']")
-        ))
-        print("Đã tìm thấy '2. Danh sách biên lai điện tử', chuẩn bị hover...")
-
-        # Hover và click vào link biên lai
-        actions.move_to_element(bien_lai_link).perform()
-        time.sleep(1)  # Đợi animation hover
-        print("Đã hover vào link biên lai")
-
-        actions.click().perform()
-        print("Đã nhấp vào '2. Danh sách biên lai điện tử'")
-
-        # Nếu có số tờ khai, thực hiện tìm kiếm
-        if so_tk:
-            try:
-                time.sleep(3)  # Đợi trang load xong
-                so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
-                so_tk_input.clear()
-                so_tk_input.send_keys(so_tk)
-                print(f"Đã điền số tờ khai: {so_tk}")
-
-                search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                # Hover và click vào nút tìm kiếm
-                actions.move_to_element(search_button).perform()
-                time.sleep(0.5)
-                actions.click().perform()
-                print("Đã nhấp nút tìm kiếm")
-
-                time.sleep(3)  # Đợi kết quả tìm kiếm
-            except Exception as e:
-                print(f"Lỗi khi tìm kiếm theo số tờ khai: {str(e)}")
-                raise
-
-    except Exception as e:
-        print(f"Lỗi khi điều hướng và tìm kiếm biên lai: {str(e)}")
-        raise
 
 def save_captcha_and_label(driver, captcha_text):
     """Lưu ảnh captcha và nhãn"""
@@ -767,100 +653,4 @@ def save_captcha_and_label(driver, captcha_text):
         print(f"Lỗi khi lưu captcha và label: {e}")
         return False
 
-
-def cleanup_tabs(driver):
-    """Đóng các tab phụ an toàn - phiên bản sync"""
-    try:
-        current_handle = driver.current_window_handle
-        for handle in driver.window_handles[:]:
-            if handle != current_handle:
-                driver.switch_to.window(handle)
-                driver.close()
-        driver.switch_to.window(current_handle)
-    except Exception as e:
-        print(f"Warning: Không thể đóng một số tab: {e}")
-
-def download_pdf(driver, link_element, session):
-    """Tải file PDF và lưu vào Google Drive"""
-    try:
-        href = link_element.get_attribute('href')
-        current_handle = driver.current_window_handle
-
-        # Lấy thông tin từ bảng
-        row = link_element.find_element(By.XPATH, "./ancestor::tr")
-        columns = row.find_elements(By.TAG_NAME, "td")
-        custom_no = columns[4].text.strip()
-        ngay = columns[9].text.strip()
-        seriesNo = columns[7].text.strip()
-        invoice_no = columns[8].text.strip()
-        total = columns[11].text.strip()
-        total_amount = convert_price_to_number(total)
-
-        # Format ngày và tên file
-        ngay_formatted = ngay.replace('/', '')
-        filename = f"CSHT_{invoice_no}.pdf"
-
-        # Kiểm tra file đã tồn tại trong Drive chưa
-        drive_instance = DriveService.get_instance()
-        service = drive_instance.service
-        root_folder_id = drive_instance.root_folder_id
-
-        # Tìm file trong folder ngày
-        date_query = f"name = '{ngay_formatted}' and mimeType = 'application/vnd.google-apps.folder' and '{root_folder_id}' in parents"
-        date_results = service.files().list(q=date_query, spaces='drive', fields='files(id)').execute()
-
-        if date_results.get('files'):
-            date_folder_id = date_results['files'][0]['id']
-            file_query = f"name = '{filename}' and mimeType = 'application/pdf' and '{date_folder_id}' in parents"
-            file_results = service.files().list(q=file_query, spaces='drive', fields='files(id)').execute()
-
-            if file_results.get('files'):
-                print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
-                return True
-
-        # Nếu file chưa tồn tại, tiếp tục tải
-        driver.execute_script(f"window.open('{href}', '_blank');")
-        driver.switch_to.window(driver.window_handles[-1])
-        time.sleep(2)  # Đợi trang load
-
-        print_options = {
-            'landscape': False,
-            'displayHeaderFooter': False,
-            'printBackground': True,
-            'preferCSSPageSize': True,
-        }
-        pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
-        pdf_data = base64.b64decode(pdf['data'])
-
-        # Upload lên Drive
-        upload_result = upload_file_to_drive(
-            file_content=pdf_data,
-            filename=filename,
-            parent_folder_date=ngay_formatted)
-
-        if not upload_result['success']:
-            raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
-
-        print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
-
-        # Cập nhật thông tin vào Google Sheet
-        invoice_info = {
-            'custom_no': custom_no,
-            'invoice_no': invoice_no,
-            'seriesNo': seriesNo,
-            'ngay': ngay,
-            'total_amount': total_amount
-        }
-        if update_invoice_info(invoice_info):
-            print("Đã cập nhật thông tin vào Google Sheet")
-        else:
-            print("Lỗi khi cập nhật Google Sheet")
-
-        driver.close()
-        driver.switch_to.window(current_handle)
-        return True
-
-    except Exception as e:
-        print(f"Lỗi khi tải PDF: {e}")
-        return False
 

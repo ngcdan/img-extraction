@@ -6,6 +6,9 @@ from receipt_fetcher import batch_process_files
 import tkinter as tk
 from tkinter import messagebox
 
+# Suppress Tk deprecation warning
+os.environ['TK_SILENCE_DEPRECATION'] = '1'
+
 def show_message_dialog(message, title="Thông báo"):
     """Hiển thị dialog thông báo trên cả Windows và macOS"""
     try:
@@ -99,8 +102,8 @@ def main():
                 "\nKết quả xử lý:\n"
                 f"- Tổng số file: {result['stats']['total_files']}\n"
                 f"- Đã xử lý: {result['stats']['processed']}\n"
-                f"- Thành công: {result['stats']['sheet_success']}\n"
-                f"- Thất bại: {result['stats']['sheet_error']}"
+                f"- Thành công: {result['stats']['download_success']}\n"
+                f"- Thất bại: {result['stats']['download_error']}"
             )
             print(summary)
             show_message_dialog(summary, "Kết quả xử lý")

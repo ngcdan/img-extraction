@@ -28,7 +28,7 @@ import sys
 from datetime import datetime
 from typing import List, Dict, Any
 from pdfminer.high_level import extract_text
-from google_sheet_utils import append_to_google_sheet_new, update_invoice_info
+from google_sheet_utils import append_to_google_sheet_new
 
 # Import các hàm helper từ extract_info.py
 from extract_info import (
@@ -51,6 +51,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         # Danh sách lưu kết quả trích xuất và upload
         extracted_results = []
         drive_upload_results = []
+        download_results = []
 
         # 1. Trích xuất thông tin từ tất cả các file trước
         for file_path in files:
@@ -105,39 +106,9 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         if not extracted_results:
             raise ValueError("Không có dữ liệu được trích xuất từ các file")
 
-        # Sắp xếp kết quả theo tax_number
-        sorted_results = sorted(
-            extracted_results,
-            key=lambda x: x.get('tax_number', '0')
-        )
-
-        # 2. Ghi tất cả dữ liệu vào Google Sheet (thực hiện trước)
-        sheet_results = []
-        for result in sorted_results:
-            try:
-                if append_to_google_sheet_new(result):
-                    sheet_results.append({
-                        'file': result['source_file'],
-                        'status': 'success'
-                    })
-                    print(f"Đã ghi thành công dữ liệu từ file {result['source_file']}")
-                else:
-                    sheet_results.append({
-                        'file': result['source_file'],
-                        'status': 'error'
-                    })
-                    print(f"Lỗi ghi dữ liệu từ file {result['source_file']}")
-            except Exception as e:
-                print(f"Lỗi khi ghi dữ liệu vào Sheet: {str(e)}")
-                sheet_results.append({
-                    'file': result['source_file'],
-                    'status': 'error',
-                    'error': str(e)
-                })
-
-        # 3. Group results by tax_number
+        # 2. Group results by tax_number
         grouped_results = {}
-        for result in sorted_results:
+        for result in sorted(extracted_results, key=lambda x: x.get('tax_number', '0')):
             tax_number = result.get('tax_number')
             customs_number = result.get('customs_number')
 
@@ -146,47 +117,185 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     grouped_results[tax_number] = []
                 grouped_results[tax_number].append(customs_number)
 
-        # 4. Sau đó mới thực hiện download
+        # 3. Thực hiện download và write dữ liệu
         driver = None
         try:
             driver = initialize_chrome()
             if not driver:
                 raise Exception("Không thể khởi tạo Chrome driver")
 
-            download_results = []
             for tax_number, customs_numbers in grouped_results.items():
                 try:
-                    download_status = {'current': 0, 'total': len(customs_numbers), 'success': 0}
-                    if process_download(
-                        driver=driver,
-                        username=tax_number,
-                        so_tk_list=customs_numbers,
-                        download_status=download_status
-                    ):
-                        download_results.append({
-                            'tax_number': tax_number,
-                            'status': 'success',
-                            'customs_count': len(customs_numbers),
-                            'success_count': download_status['success']
-                        })
-                        print(f"Đã tải thành công {download_status['success']}/{len(customs_numbers)} biên lai cho MST {tax_number}")
-                    else:
-                        download_results.append({
-                            'tax_number': tax_number,
-                            'status': 'error',
-                            'customs_count': len(customs_numbers),
-                            'success_count': download_status['success']
-                        })
-                        print(f"Lỗi tải biên lai cho MST {tax_number}")
+                    session = requests.Session()
+                    session.verify = False
+
+                    # Mở tab mới và login
+                    driver.execute_script("window.open('about:blank', '_blank');")
+                    driver.switch_to.window(driver.window_handles[-1])
+
+                    # Login process
+                    login_success = False
+                    cookies_loaded = load_cookies(driver, tax_number)
+                    if cookies_loaded:
+                        driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
+                        if check_login_status(driver):
+                            login_success = True
+                            print("Đã đăng nhập lại bằng cookies")
+
+                    if not login_success:
+                        driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
+                        if fill_login_info(driver, tax_number, tax_number):
+                            login_success = collect_captcha_if_login(driver)
+                            if login_success:
+                                save_cookies(driver, tax_number)
+
+                    if not login_success:
+                        raise Exception(f"Không thể đăng nhập với MST {tax_number}")
+
+                    # Lấy tokens và cookies
+                    driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
+                    time.sleep(2)
+
+                    request_token_form = driver.find_element(By.NAME, "__RequestVerificationToken").get_attribute("value")
+                    browser_cookies = driver.get_cookies()
+
+                    cookies = {}
+                    for cookie in browser_cookies:
+                        if cookie['name'] in ['__RequestVerificationToken', 'SessionToken', 'ASP.NET_SessionId']:
+                            cookies[cookie['name']] = cookie['value']
+
+                    headers = {
+                        "Accept": "*/*",
+                        "Accept-Encoding": "gzip, deflate",
+                        "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "Host": "thuphi.haiphong.gov.vn:8222",
+                        "Origin": "http://thuphi.haiphong.gov.vn:8222",
+                        "Referer": "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "__RequestVerificationToken": request_token_form
+                    }
+
+                    success_count = 0
+                    for idx, so_tk in enumerate(customs_numbers, 1):
+                        try:
+                            data = {
+                                "EinvoiceFrom": "0",
+                                "tu_ngay": "01/01/2024",
+                                "den_ngay": "31/12/2024",
+                                "ma_dn": tax_number,
+                                "so_tokhai": so_tk,
+                                "pageNum": "1",
+                                "__RequestVerificationToken": request_token_form
+                            }
+
+                            response = session.post(
+                                "http://thuphi.haiphong.gov.vn:8222/DBienLaiThuPhi_TraCuu/GetListEinvoiceByMaDN/",
+                                headers=headers,
+                                cookies=cookies,
+                                data=data
+                            )
+
+                            if response.status_code == 200:
+                                result = response.json()
+                                if result.get("code") == 1 and result.get("DANHSACH"):
+                                    for receipt in result['DANHSACH']:
+                                        ngay_tk_str = receipt.get('NgayTK', '')
+                                        if ngay_tk_str:
+                                            # Trích xuất timestamp từ chuỗi "/Date(1740762000000)/"
+                                            timestamp = int(ngay_tk_str.split('(')[1].split(')')[0])
+                                            # Chuyển timestamp (milliseconds) sang datetime
+                                            ngay_tk = datetime.fromtimestamp(timestamp/1000)
+                                            # Format ngày thành dd/mm/yyyy
+                                            ngay_tk = ngay_tk.strftime('%d/%m/%Y')
+                                        else:
+                                            ngay_tk = ''
+
+                                        invoice_info = {
+                                            'custom_no': receipt.get('SoTK', ''),
+                                            'invoice_no': str(receipt.get('SoBienLai', '')),
+                                            'seriesNo': receipt.get('MauBienLai', ''),
+                                            'ngay': ngay_tk,
+                                            'total_amount': receipt.get('TongTien', 0),
+                                            'drive_link': receipt.get('InvoiceKey', '')
+                                        }
+
+                                        print(f"Xử lý biên lai: {json.dumps(invoice_info, indent=2, ensure_ascii=False)}")
+
+                                        # Tìm thông tin tương ứng trong extracted_results
+                                        matching_result = next(
+                                            (result for result in extracted_results
+                                            if result.get('customs_number') == so_tk),
+                                            None
+                                        )
+
+                                        if matching_result:
+                                            # Merge thông tin từ extracted_results vào invoice_info
+                                            invoice_info.update({
+                                                'tax_number': tax_number,
+                                                'so_ct': matching_result.get('so_ct'),
+                                                'partner_invoice_name': matching_result.get('partner_invoice_name'),
+                                                'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                            })
+                                            print(json.dumps(invoice_info, indent=2, ensure_ascii=False))
+
+                                            # Tạo URL xem biên lai
+                                            invoice_url = f"http://thuphi.haiphong.gov.vn:8222/Viewer/HoaDonViewer.aspx?mhd={invoice_info['drive_link']}"
+
+                                            # Mở tab mới để tải PDF
+                                            driver.execute_script(f"window.open('{invoice_url}', '_blank');")
+
+                                            driver.switch_to.window(driver.window_handles[-1])
+                                            time.sleep(2)
+
+                                            print_options = {
+                                                'landscape': False,
+                                                'displayHeaderFooter': False,
+                                                'printBackground': True,
+                                                'preferCSSPageSize': True,
+                                            }
+                                            pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
+                                            pdf_data = base64.b64decode(pdf['data'])
+
+                                            # Upload lên Drive
+                                            upload_result = upload_file_to_drive(
+                                                file_content=pdf_data,
+                                                filename=f"CSHT_{invoice_info['invoice_no']}.pdf",
+                                                parent_folder_date=ngay_tk)
+
+                                            if upload_result['success']:
+                                                if append_to_google_sheet_new(invoice_info):
+                                                    success_count += 1
+                                                    print(f"Đã xử lý thành công biên lai {invoice_info['invoice_no']}")
+                                            else:
+                                                print(f"Lỗi khi upload file: {upload_result.get('error')}")
+                                                raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
+                                        else:
+                                            print(f"\nKhông tìm thấy thông tin gốc cho số tờ khai: {so_tk}")
+
+                        except Exception as e:
+                            print(f"Lỗi khi xử lý số tờ khai {so_tk}: {str(e)}")
+                            continue
+
+                    download_results.append({
+                        'tax_number': tax_number,
+                        'status': 'success' if success_count > 0 else 'error',
+                        'customs_count': len(customs_numbers),
+                        'success_count': success_count
+                    })
+
                 except Exception as e:
-                    print(f"Lỗi khi tải biên lai: {str(e)}")
+                    print(f"Lỗi khi xử lý MST {tax_number}: {str(e)}")
                     download_results.append({
                         'tax_number': tax_number,
                         'status': 'error',
                         'error': str(e),
                         'customs_count': len(customs_numbers),
-                        'success_count': download_status.get('success', 0)
+                        'success_count': 0
                     })
+                finally:
+                    if 'session' in locals():
+                        session.close()
 
         finally:
             if driver:
@@ -199,8 +308,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         stats = {
             'total_files': len(files),
             'processed': len(extracted_results),
-            'sheet_success': len([r for r in sheet_results if r['status'] == 'success']),
-            'sheet_error': len([r for r in sheet_results if r['status'] == 'error']),
             'download_success': len([r for r in download_results if r['status'] == 'success']),
             'download_error': len([r for r in download_results if r['status'] == 'error']),
             'drive_uploads': drive_upload_results
@@ -210,7 +317,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             'success': True,
             'message': f'Đã xử lý {len(files)} file',
             'stats': stats,
-            'sheet_results': sheet_results,
             'download_results': download_results
         }
 
@@ -388,7 +494,7 @@ def process_download(driver, username, so_tk_list=None, download_status=None):
                                 print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
 
                                 # Cập nhật thông tin vào Google Sheet
-                                if update_invoice_info(invoice_info):
+                                if append_to_google_sheet_new(invoice_info):
                                     print(f"Đã cập nhật thông tin biên lai {invoice_info['invoice_no']} vào Google Sheet")
                                 else:
                                     print(f"Lỗi khi cập nhật biên lai {invoice_info['invoice_no']} vào Google Sheet")

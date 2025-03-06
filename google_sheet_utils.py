@@ -149,7 +149,25 @@ def append_to_google_sheet(extracted_info):
         return False
 
 def append_to_google_sheet_new(extracted_info):
-    """Thêm thông tin vào Google Sheet"""
+    """
+    Thêm thông tin vào Google Sheet
+    Args:
+        invoice_info: dict chứa thông tin invoice {
+            {
+            "tax_number": "106981952010",
+            "custom_no": "106981952010",
+            "invoice_no": "4658624",
+            "seriesNo": "01BLP0-001",
+            "ngay": "03/03/2025",
+            "total_amount": 54595.0,
+            "drive_link": "5e586ce9-393d-4450-ae6e-c80cdf45184a",
+            "so_ct": "202509401778",
+            "partner_invoice_name": "CONG TY TNHH GG HAI DUONG",
+            "processed_at": "2025-03-06 15:38:11"
+            }
+        }
+    """
+
     try:
         sheet_instance = SheetService.get_instance()
         sheet = sheet_instance.service.spreadsheets()
@@ -201,22 +219,20 @@ def append_to_google_sheet_new(extracted_info):
             fixed_data['vendor'],
             extracted_info.get('jobId', ''),
             extracted_info.get('hawb', ''),
-            extracted_info.get('customs_number', ''),
+            extracted_info.get('custom_no', ''),
             fixed_data['charge_code'],
             fixed_data['description'],
             1,
             fixed_data['unit'],
-            '',
-            ''
-            '',
-            '',
+            extracted_info.get('total_amount', ''),
+            '', # tax
+            extracted_info.get('total_amount', ''),
             extracted_info.get('tax_number', '') != '0303482440',
-            '', '', '',
+            extracted_info.get('invoice_no', ''),
+            extracted_info.get('seriesNo', ''),
+            extracted_info.get('ngay', ''),
             extracted_info.get('tax_number'),
             extracted_info.get('partner_invoice_name'),
-            '',  # Cột 20 để trống (Notes)
-            '',
-            ''
         ]
         values.append(row_data)
 
@@ -239,11 +255,17 @@ def update_invoice_info(invoice_info):
 
     Args:
         invoice_info: dict chứa thông tin invoice {
-            'custom_no': số tờ khai,
-            'invoice_no': số hóa đơn,
-            'seriesNo': số series,
-            'ngay': ngày hóa đơn,
-            'total_amount': tổng tiền
+            {
+            "custom_no": "106981952010",
+            "invoice_no": "4658624",
+            "seriesNo": "01BLP0-001",
+            "ngay": "03/03/2025",
+            "total_amount": 54595.0,
+            "drive_link": "5e586ce9-393d-4450-ae6e-c80cdf45184a",
+            "so_ct": "202509401778",
+            "partner_invoice_name": "CONG TY TNHH GG HAI DUONG",
+            "processed_at": "2025-03-06 15:38:11"
+            }
         }
     """
     try:

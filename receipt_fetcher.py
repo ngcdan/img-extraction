@@ -175,24 +175,60 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     driver.execute_script("window.open('about:blank', '_blank');")
                     driver.switch_to.window(driver.window_handles[-1])
 
+                    # Khởi tạo WebDriverWait với timeout dài hơn
+                    long_wait = WebDriverWait(driver, 120)  # 2 phút
+                    short_wait = WebDriverWait(driver, 2)   # 2 giây
+
+                    def is_page_loaded():
+                        try:
+                            return driver.execute_script("return document.readyState") == "complete"
+                        except:
+                            return False
+
+                    def wait_for_page_load(url, timeout=120):
+                        start_time = time.time()
+                        driver.get(url)
+
+                        while time.time() - start_time < timeout:
+                            try:
+                                if is_page_loaded():
+                                    # Thêm delay ngắn để đảm bảo JS đã chạy
+                                    time.sleep(0.5)
+                                    return True
+                            except:
+                                pass
+                            time.sleep(0.5)
+                        return False
+
                     # Login process
                     login_success = False
                     cookies_loaded = load_cookies(driver, tax_number)
 
                     # Kiểm tra URL sau khi chuyển hướng
                     if cookies_loaded:
-                        driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
-                        login_success = "dang-nhap" not in driver.current_url
+                        if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/Home"):
+                            try:
+                                # Đợi cho đến khi có thể tương tác với trang
+                                long_wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
+                                login_success = "dang-nhap" not in driver.current_url
+                            except:
+                                print("Timeout khi đợi trang Home load hoàn tất")
 
                     if not login_success:
-                        driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
-                        if fill_login_info(driver, tax_number, tax_number):
-                            login_success = collect_captcha_if_login(driver)
-                            if login_success:
-                                save_cookies(driver, tax_number)
+                        if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/dang-nhap"):
+                            try:
+                                # Đợi form login xuất hiện và có thể tương tác
+                                long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
+
+                                if fill_login_info(driver, tax_number, tax_number):
+                                    login_success = collect_captcha_if_login(driver)
+                                    if login_success:
+                                        save_cookies(driver, tax_number)
+                            except Exception as e:
+                                print(f"Lỗi trong quá trình login: {str(e)}")
 
                     if not login_success:
-                        raise Exception(f"Không thể đăng nhập với MST {tax_number}")
+                        raise Exception(f"Không thể đăng nhập với MST {tax_number} sau nhiều lần thử")
 
                     # Truy cập trang tìm kiếm
                     driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
@@ -814,47 +850,157 @@ def is_table_loaded_with_data(driver, short_wait):
         print(f"Lỗi khi kiểm tra trạng thái bảng: {str(e)}")
         return False
 
+def is_page_loaded(driver, short_wait=None):
+    """
+    Kiểm tra xem trang web đã load hoàn tất chưa
 
+    Args:
+        driver: WebDriver instance
+        short_wait: WebDriverWait instance với timeout ngắn (optional)
 
+    Returns:
+        bool: True nếu trang đã load hoàn tất
+    """
+    try:
+        # 1. Kiểm tra document.readyState
+        ready_state = driver.execute_script('return document.readyState')
+        if ready_state != 'complete':
+            return False
 
+        # 2. Kiểm tra jQuery (nếu trang sử dụng jQuery)
+        jquery_ready = driver.execute_script('''
+            if (typeof jQuery !== 'undefined') {
+                return jQuery.active === 0;
+            }
+            return true;
+        ''')
+        if not jquery_ready:
+            return False
 
+        # 3. Kiểm tra các request AJAX đang pending
+        ajax_complete = driver.execute_script('''
+            if (window.XMLHttpRequest) {
+                var openRequests = 0;
+                var oldSend = XMLHttpRequest.prototype.send;
 
+                if (typeof window._activeRequests === 'undefined') {
+                    window._activeRequests = 0;
+                    XMLHttpRequest.prototype.send = function() {
+                        window._activeRequests++;
+                        this.addEventListener('readystatechange', function() {
+                            if (this.readyState === 4) {
+                                window._activeRequests--;
+                            }
+                        });
+                        oldSend.apply(this, arguments);
+                    };
+                }
+                return window._activeRequests === 0;
+            }
+            return true;
+        ''')
+        if not ajax_complete:
+            return False
 
+        # 4. Kiểm tra các element loading phổ biến
+        loading_indicators = [
+            '.loading',
+            '.spinner',
+            '.preloader',
+            '.preloader-container',
+            '#loading',
+            '#spinner',
+            '.loading-overlay',
+            '.processing'
+        ]
 
+        for indicator in loading_indicators:
+            elements = driver.find_elements(By.CSS_SELECTOR, indicator)
+            for element in elements:
+                try:
+                    if element.is_displayed():
+                        return False
+                except:
+                    continue
 
+        # 5. Kiểm tra animation
+        animations_complete = driver.execute_script('''
+            var animations = document.getAnimations
+                ? document.getAnimations()
+                : document.getElementsByClassName('animated');
+            return animations.length === 0;
+        ''')
+        if not animations_complete:
+            return False
 
+        # 6. Kiểm tra các iframe (nếu có)
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        for iframe in iframes:
+            try:
+                if iframe.is_displayed():
+                    driver.switch_to.frame(iframe)
+                    iframe_ready = driver.execute_script('return document.readyState') == 'complete'
+                    driver.switch_to.parent_frame()
+                    if not iframe_ready:
+                        return False
+            except:
+                driver.switch_to.parent_frame()
+                continue
 
+        # 7. Kiểm tra error messages
+        error_indicators = [
+            '.error',
+            '.error-message',
+            '#error',
+            '.alert-error',
+            '.alert-danger'
+        ]
 
+        for indicator in error_indicators:
+            elements = driver.find_elements(By.CSS_SELECTOR, indicator)
+            for element in elements:
+                try:
+                    if element.is_displayed():
+                        error_text = element.text.lower()
+                        if 'error' in error_text or 'lỗi' in error_text:
+                            print(f"Phát hiện lỗi: {error_text}")
+                            return False
+                except:
+                    continue
 
+        return True
 
+    except Exception as e:
+        print(f"Lỗi khi kiểm tra trạng thái trang: {str(e)}")
+        return False
 
+def wait_for_page_load(driver, url, timeout=120):
+    """
+    Đợi cho trang web load hoàn tất
 
+    Args:
+        driver: WebDriver instance
+        url: URL cần truy cập
+        timeout: Thời gian tối đa chờ đợi (giây)
 
+    Returns:
+        bool: True nếu trang load thành công
+    """
+    short_wait = WebDriverWait(driver, 2)
+    start_time = time.time()
 
+    try:
+        driver.get(url)
 
+        while time.time() - start_time < timeout:
+            if is_page_loaded(driver, short_wait):
+                print(f"Trang {url} đã load hoàn tất sau {time.time() - start_time:.1f} giây")
+                return True
+            time.sleep(0.5)
 
+        print(f"Timeout: Trang {url} không load hoàn tất sau {timeout} giây")
+        return False
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    except Exception as e:
+        print(f"Lỗi khi load trang {url}: {str(e)}")
+        return False

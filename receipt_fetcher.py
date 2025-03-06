@@ -28,7 +28,7 @@ import sys
 from datetime import datetime
 from typing import List, Dict, Any
 from pdfminer.high_level import extract_text
-from google_sheet_utils import append_to_google_sheet_new
+from google_sheet_utils import append_to_google_sheet_new, update_invoice_info
 
 # Import các hàm helper từ extract_info.py
 from extract_info import (
@@ -385,22 +385,27 @@ def process_download(driver, username, so_tk_list=None, download_status=None):
         download_status: Dict để theo dõi trạng thái
     """
     try:
+        # Tạo session với SSL verification disabled
+        import requests
+        session = requests.Session()
+        session.verify = False
+
         # Mở tab mới và switch sang
         driver.execute_script("window.open('about:blank', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
 
-        # Phần đăng nhập giữ nguyên
-        async def handle_login():
+        # Xử lý đăng nhập
+        def handle_login():
             cookies_loaded = load_cookies(driver, username)
             if cookies_loaded:
                 driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
                 if not check_login_status(driver):
-                    return await perform_login()
+                    return perform_login()
                 print("Đã đăng nhập lại bằng cookies")
                 return True
-            return await perform_login()
+            return perform_login()
 
-        async def perform_login():
+        def perform_login():
             driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
             if not fill_login_info(driver, username, username):
                 return False
@@ -410,8 +415,7 @@ def process_download(driver, username, so_tk_list=None, download_status=None):
             return login_success
 
         # Đăng nhập
-        import asyncio
-        if not asyncio.run(handle_login()):
+        if not handle_login():
             raise Exception("Không thể đăng nhập")
 
         wait = WebDriverWait(driver, 20)
@@ -432,9 +436,40 @@ def process_download(driver, username, so_tk_list=None, download_status=None):
                     so_tk_input.clear()
                     so_tk_input.send_keys(so_tk)
 
-                    search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                    search_button.click()
-                    time.sleep(2)
+                    # Đợi preloader biến mất nếu có
+                    try:
+                        preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
+                        wait.until(EC.invisibility_of_element(preloader))
+                    except:
+                        pass  # Bỏ qua nếu không tìm thấy preloader
+
+                    # Tìm và click nút tìm kiếm với retry
+                    max_retries = 3
+                    retry_count = 0
+                    while retry_count < max_retries:
+                        try:
+                            search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
+                            # Scroll đến nút
+                            driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
+                            time.sleep(0.5)
+                            # Thử click bằng JavaScript
+                            driver.execute_script("arguments[0].click();", search_button)
+                            print("Đã nhấp nút tìm kiếm")
+                            break
+                        except Exception as e:
+                            retry_count += 1
+                            print(f"Lần thử {retry_count}: Không thể click nút tìm kiếm. Đang thử lại...")
+                            time.sleep(1)
+                            if retry_count == max_retries:
+                                raise Exception(f"Không thể click nút tìm kiếm sau {max_retries} lần thử: {str(e)}")
+
+                    # Đợi preloader biến mất sau khi click
+                    time.sleep(1)
+                    try:
+                        preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
+                        wait.until(EC.invisibility_of_element(preloader))
+                    except:
+                        pass
 
                     # Tìm links cho số tờ khai hiện tại
                     current_links = wait.until(EC.presence_of_all_elements_located((
@@ -445,19 +480,22 @@ def process_download(driver, username, so_tk_list=None, download_status=None):
                     if current_links:
                         print(f"Tìm thấy {len(current_links)} biên lai cho số tờ khai {so_tk}")
 
-                        # Download ngay lập tức các biên lai của tờ khai này
-                        async def download_current_receipts():
-                            tasks = []
-                            for i, link in enumerate(current_links, 1):
-                                if 'Xem' in link.text:
-                                    tasks.append(download_pdf_async(driver, link, i, len(current_links)))
-                            return await asyncio.gather(*tasks)
+                        # Download từng biên lai
+                        success_count = 0
+                        for i, link in enumerate(current_links, 1):
+                            if 'Xem' in link.text:
+                                try:
+                                    print(f"Đang tải biên lai {i}/{len(current_links)}")
+                                    if download_pdf(driver, link, session):
+                                        success_count += 1
+                                        print(f"Thành công biên lai {i}/{len(current_links)}")
+                                    else:
+                                        print(f"Thất bại biên lai {i}/{len(current_links)}")
+                                except Exception as e:
+                                    print(f"Lỗi khi tải biên lai {i}/{len(current_links)}: {e}")
+                                    continue
 
-                        # Thực hiện download
-                        results = asyncio.run(download_current_receipts())
-                        success_count = sum(1 for r in results if r)
                         total_success += success_count
-
                         print(f"Đã tải xong {success_count}/{len(current_links)} biên lai cho số tờ khai {so_tk}")
                     else:
                         print(f"Không tìm thấy biên lai nào cho số tờ khai {so_tk}")
@@ -465,6 +503,11 @@ def process_download(driver, username, so_tk_list=None, download_status=None):
                 except Exception as e:
                     print(f"Lỗi khi xử lý số tờ khai {so_tk}: {str(e)}")
                     continue
+
+                finally:
+                    # Dọn dẹp memory sau mỗi lần xử lý
+                    import gc
+                    gc.collect()
 
         # Cập nhật trạng thái
         if download_status:
@@ -478,6 +521,101 @@ def process_download(driver, username, so_tk_list=None, download_status=None):
         print(f"Lỗi: {str(e)}")
         if download_status:
             download_status['status'] = 'error'
+        return False
+
+    finally:
+        # Đảm bảo dọn dẹp resources
+        if 'session' in locals():
+            session.close()
+
+
+def download_pdf(driver, link_element, session):
+    """Tải file PDF và lưu vào Google Drive"""
+    try:
+        href = link_element.get_attribute('href')
+        current_handle = driver.current_window_handle
+
+        # Lấy thông tin từ bảng
+        row = link_element.find_element(By.XPATH, "./ancestor::tr")
+        columns = row.find_elements(By.TAG_NAME, "td")
+        custom_no = columns[4].text.strip()
+        ngay = columns[9].text.strip()
+        seriesNo = columns[7].text.strip()
+        invoice_no = columns[8].text.strip()
+        total = columns[11].text.strip()
+        total_amount = convert_price_to_number(total)
+
+        # Format ngày và tên file
+        ngay_formatted = ngay.replace('/', '')
+        filename = f"CSHT_{invoice_no}.pdf"
+
+        # Kiểm tra file đã tồn tại trong Drive chưa
+        drive_instance = DriveService.get_instance()
+        service = drive_instance.service
+        root_folder_id = drive_instance.root_folder_id
+
+        # Tìm file trong folder ngày
+        date_query = f"name = '{ngay_formatted}' and mimeType = 'application/vnd.google-apps.folder' and '{root_folder_id}' in parents"
+        date_results = service.files().list(q=date_query, spaces='drive', fields='files(id)').execute()
+
+        if date_results.get('files'):
+            date_folder_id = date_results['files'][0]['id']
+            file_query = f"name = '{filename}' and mimeType = 'application/pdf' and '{date_folder_id}' in parents"
+            file_results = service.files().list(q=file_query, spaces='drive', fields='files(id)').execute()
+
+            if file_results.get('files'):
+                print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
+                return True
+
+        # Nếu file chưa tồn tại, tiếp tục tải
+        driver.execute_script(f"window.open('{href}', '_blank');")
+        driver.switch_to.window(driver.window_handles[-1])
+        time.sleep(2)  # Đợi trang load
+
+        print_options = {
+            'landscape': False,
+            'displayHeaderFooter': False,
+            'printBackground': True,
+            'preferCSSPageSize': True,
+        }
+        pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
+        pdf_data = base64.b64decode(pdf['data'])
+
+        # Upload lên Drive
+        upload_result = upload_file_to_drive(
+            file_content=pdf_data,
+            filename=filename,
+            parent_folder_date=ngay_formatted)
+
+        if not upload_result['success']:
+            raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
+
+        print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
+
+        invoice_info = {
+            'custom_no': custom_no,
+            'invoice_no': invoice_no,
+            'seriesNo': seriesNo,
+            'ngay': ngay,
+            'total_amount': total_amount,
+            'drive_link': upload_result['web_view_link']  # Thêm link drive vào thông tin
+        }
+
+        try:
+            if update_invoice_info(invoice_info):
+                print("Đã cập nhật thông tin vào Google Sheet")
+            else:
+                print("Lỗi khi cập nhật Google Sheet")
+        except Exception as e:
+            print(f"Lỗi khi cập nhật Google Sheet: {str(e)}")
+            # Không raise exception ở đây để không ảnh hưởng đến quá trình tải file
+
+        driver.close()
+        driver.switch_to.window(current_handle)
+        return True
+
+    except Exception as e:
+        print(f"Lỗi khi tải PDF: {e}")
         return False
 
 def fill_login_info(driver, username, password, max_retries=3):
@@ -629,16 +767,6 @@ def save_captcha_and_label(driver, captcha_text):
         print(f"Lỗi khi lưu captcha và label: {e}")
         return False
 
-async def download_pdf_async(driver, link, current, total):
-    """Tải PDF bất đồng bộ"""
-    try:
-        print(f"Đang tải biên lai {current}/{total}")
-        result = await asyncio.to_thread(download_pdf, driver, link)
-        print(f"{'Thành công' if result else 'Thất bại'} biên lai {current}/{total}")
-        return result
-    except Exception as e:
-        print(f"Lỗi tải biên lai {current}/{total}: {e}")
-        return False
 
 def cleanup_tabs(driver):
     """Đóng các tab phụ an toàn - phiên bản sync"""
@@ -652,7 +780,7 @@ def cleanup_tabs(driver):
     except Exception as e:
         print(f"Warning: Không thể đóng một số tab: {e}")
 
-def download_pdf(driver, link_element):
+def download_pdf(driver, link_element, session):
     """Tải file PDF và lưu vào Google Drive"""
     try:
         href = link_element.get_attribute('href')
@@ -688,14 +816,12 @@ def download_pdf(driver, link_element):
 
             if file_results.get('files'):
                 print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
-                print(f"File {filename} đã tồn tại trong Drive")
                 return True
 
         # Nếu file chưa tồn tại, tiếp tục tải
         driver.execute_script(f"window.open('{href}', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
-        wait = WebDriverWait(driver, 5)
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        time.sleep(2)  # Đợi trang load
 
         print_options = {
             'landscape': False,
@@ -716,10 +842,8 @@ def download_pdf(driver, link_element):
             raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
 
         print(f"Đã tải file lên Google Drive: {upload_result['web_view_link']}")
-        print(f"Đã lưu file {filename} vào Google Drive")
 
         # Cập nhật thông tin vào Google Sheet
-        from google_sheet_utils import update_invoice_info
         invoice_info = {
             'custom_no': custom_no,
             'invoice_no': invoice_no,
@@ -727,8 +851,7 @@ def download_pdf(driver, link_element):
             'ngay': ngay,
             'total_amount': total_amount
         }
-        update_result = update_invoice_info(invoice_info)
-        if update_result:
+        if update_invoice_info(invoice_info):
             print("Đã cập nhật thông tin vào Google Sheet")
         else:
             print("Lỗi khi cập nhật Google Sheet")
@@ -739,6 +862,5 @@ def download_pdf(driver, link_element):
 
     except Exception as e:
         print(f"Lỗi khi tải PDF: {e}")
-        print(f"Lỗi khi tải file: {str(e)}")
         return False
 

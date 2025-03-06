@@ -579,7 +579,7 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
     login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
     home_url = "http://thuphi.haiphong.gov.vn:8222/Home"
     start_time = time.time()
-    last_captcha = None  # Cache captcha cuối cùng
+    last_captcha = {'text': None, 'image': None}  # Cache captcha cuối cùng
 
     def is_login_successful():
         """Kiểm tra đăng nhập thành công"""
@@ -668,14 +668,21 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
             # Cập nhật captcha cuối cùng
             current_captcha = get_current_captcha()
             if current_captcha and len(current_captcha) >= 5:
-                last_captcha = current_captcha
+                try:
+                    captcha_element = driver.find_element(By.ID, "CaptchaImage")
+                    last_captcha = {
+                        'text': current_captcha,
+                        'image': captcha_element.screenshot_as_png
+                    }
+                except:
+                    pass
 
             # Kiểm tra đăng nhập thành công
             if is_login_successful():
                 print("Đăng nhập thành công!")
-                if last_captcha:
-                    print(f"Lưu captcha cuối cùng: {last_captcha}")
-                    save_captcha_and_label(driver, last_captcha)
+                if last_captcha['text'] and last_captcha['image']:
+                    print(f"Lưu captcha cuối cùng: {last_captcha['text']}")
+                    save_captcha_and_label(last_captcha['image'], last_captcha['text'])
                 save_cookies(driver, username)
                 return True
 
@@ -712,6 +719,73 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
 
     raise Exception(f"Hết thời gian chờ ({max_wait_time}s) - Người dùng chưa đăng nhập thành công")
 
+def collect_captcha_if_login(driver):
+    """Thu thập captcha nếu cần đăng nhập"""
+    try:
+        # Thêm script theo dõi captcha
+        js_script = """
+        window.captchaValue = '';
+        window.getCaptchaValue = function() {
+            return window.captchaValue;
+        };
+        const captchaInput = document.getElementById('CaptchaInputText');
+        if (captchaInput) {
+            captchaInput.addEventListener('blur', function() {
+                window.captchaValue = this.value;
+            });
+            captchaInput.addEventListener('input', function() {
+                if (this.value.length >= 5) {
+                    window.captchaValue = this.value;
+                }
+            });
+        }
+        """
+        driver.execute_script(js_script)
+
+        # Đợi đăng nhập thành công và lưu captcha
+        current_url = driver.current_url
+        timeout = time.time() + 60  # timeout 60 giây
+        captcha_saved = False
+        login_success = False
+
+        while time.time() < timeout:
+            try:
+                if not captcha_saved:
+                    captcha_text = driver.execute_script("return window.getCaptchaValue()")
+                    if captcha_text and len(captcha_text) >= 5:
+                        save_captcha_and_label(driver, captcha_text)
+                        captcha_saved = True
+
+                if current_url != driver.current_url:
+                    if driver.current_url == "http://thuphi.haiphong.gov.vn:8222/Home":
+                        login_success = True
+                        break
+            except Exception:
+                continue
+            time.sleep(0.5)
+
+        return login_success
+    except Exception as e:
+        print(f"Lỗi khi thu thập captcha: {e}")
+        return False
+
+
+def save_captcha_and_label(image_data, captcha_text):
+    """Lưu ảnh captcha và nhãn"""
+    try:
+        from google_drive_utils import upload_captcha_to_drive, append_to_labels_file
+        result = upload_captcha_to_drive(image_data)
+
+        if result['success']:
+            print(f"Đã lưu captcha {result['filename']} với label: {captcha_text}")
+            append_result = append_to_labels_file(result['filename'], captcha_text)
+            return append_result['success']
+        return False
+
+    except Exception as e:
+        print(f"Lỗi khi lưu captcha và label: {e}")
+        return False
+
 def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
     try:
@@ -730,45 +804,6 @@ def initialize_chrome():
                 chrome_path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
         else:  # macOS
             chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-
-        if not os.path.exists(chrome_path):
-            raise Exception(f"Không tìm thấy Chrome tại {chrome_path}")
-
-        # Cleanup các process Chrome debug đang chạy
-        try:
-            if platform.system() == 'Windows':
-                os.system('taskkill /f /im "chrome.exe" /fi "windowtitle eq Chrome Debug"')
-            else:
-                os.system('pkill -f "Chrome.*--remote-debugging-port=9222"')
-            time.sleep(2)
-        except:
-            pass
-
-        # Cleanup ChromeDriver processes
-        try:
-            if platform.system() == 'Windows':
-                os.system('taskkill /f /im chromedriver.exe')
-            else:
-                os.system('pkill -f chromedriver')
-            time.sleep(2)
-        except:
-            pass
-
-        # Kiểm tra và tạo thư mục debug nếu cần
-        debug_dir = os.path.join(os.path.expanduser('~'), '.chrome-debug')
-        if not os.path.exists(debug_dir):
-            os.makedirs(debug_dir)
-
-        # Thiết lập Chrome options
-        chrome_options = Options()
-        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--disable-software-rasterizer')
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-notifications')
-        chrome_options.add_argument('--start-maximized')
 
         # Kiểm tra xem Chrome có đang chạy với debug port không
         chrome_running = False
@@ -843,94 +878,7 @@ def load_cookies(driver, username):
         print(f"Lỗi khi load cookies: {e}")
         return False
 
-def check_login_status(driver):
-    """Kiểm tra trạng thái đăng nhập"""
-    try:
-        driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
-        time.sleep(2)
-        # Kiểm tra URL sau khi chuyển hướng
-        return "dang-nhap" not in driver.current_url
-    except:
-        return False
 
-def collect_captcha_if_login(driver):
-    """Thu thập captcha nếu cần đăng nhập"""
-    try:
-        # Thêm script theo dõi captcha
-        js_script = """
-        window.captchaValue = '';
-        window.getCaptchaValue = function() {
-            return window.captchaValue;
-        };
-        const captchaInput = document.getElementById('CaptchaInputText');
-        if (captchaInput) {
-            captchaInput.addEventListener('blur', function() {
-                window.captchaValue = this.value;
-            });
-            captchaInput.addEventListener('input', function() {
-                if (this.value.length >= 5) {
-                    window.captchaValue = this.value;
-                }
-            });
-        }
-        """
-        driver.execute_script(js_script)
-
-        # Đợi đăng nhập thành công và lưu captcha
-        current_url = driver.current_url
-        timeout = time.time() + 60  # timeout 60 giây
-        captcha_saved = False
-        login_success = False
-
-        while time.time() < timeout:
-            try:
-                if not captcha_saved:
-                    captcha_text = driver.execute_script("return window.getCaptchaValue()")
-                    if captcha_text and len(captcha_text) >= 5:
-                        save_captcha_and_label(driver, captcha_text)
-                        captcha_saved = True
-
-                if current_url != driver.current_url:
-                    if driver.current_url == "http://thuphi.haiphong.gov.vn:8222/Home":
-                        login_success = True
-                        break
-            except Exception:
-                continue
-            time.sleep(0.5)
-
-        return login_success
-    except Exception as e:
-        print(f"Lỗi khi thu thập captcha: {e}")
-        return False
-
-
-def save_captcha_and_label(driver, captcha_text):
-    """Lưu ảnh captcha và nhãn"""
-    try:
-        captcha_element = driver.find_element(By.ID, "CaptchaImage")
-        png_data = captcha_element.screenshot_as_png
-
-        from google_drive_utils import upload_captcha_to_drive, append_to_labels_file
-        result = upload_captcha_to_drive(png_data)
-
-        if result['success']:
-            print(f"Đã lưu captcha {result['filename']} với label: {captcha_text}")
-
-            # Append vào file labels.txt trên Drive
-            append_result = append_to_labels_file(result['filename'], captcha_text)
-            if append_result['success']:
-                print("Đã thêm label vào file labels.txt trên Drive")
-                return True
-            else:
-                print(f"Lỗi khi thêm label: {append_result.get('error')}")
-                return False
-        else:
-            print(f"Lỗi khi lưu captcha: {result.get('error')}")
-            return False
-
-    except Exception as e:
-        print(f"Lỗi khi lưu captcha và label: {e}")
-        return False
 
 def is_table_loaded_with_data(driver, short_wait):
     """

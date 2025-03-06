@@ -280,65 +280,78 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                     # Kiểm tra nếu min_date bé hơn ngày đầu tháng
                     if min_date < first_day_of_month:
-                        # Điền ngày bắt đầu (TU_NGAY)
-                        tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
-                        tu_ngay_input.clear()
-                        tu_ngay_input.send_keys(customs['min_date'])
+                        # Điền form tìm kiếm
+                        try:
+                            # Đợi và điền ngày bắt đầu
+                            tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
+                            tu_ngay_input.clear()
+                            tu_ngay_input.send_keys(customs['min_date'])
 
-                        # Điền ngày kết thúc (DEN_NGAY)
-                        den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
-                        den_ngay_input.clear()
-                        den_ngay_input.send_keys(customs['max_date'])
+                            # Đợi và điền ngày kết thúc
+                            den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
+                            den_ngay_input.clear()
+                            den_ngay_input.send_keys(customs['max_date'])
 
-                        # Tìm và click nút tìm kiếm với retry
+                        except Exception as e:
+                            raise Exception(f"Lỗi khi điền form tìm kiếm: {str(e)}")
+
+                        # Thực hiện tìm kiếm với retry
                         max_retries = 3
                         retry_count = 0
                         while retry_count < max_retries:
                             try:
+                                # Lưu trạng thái bảng hiện tại để so sánh
+                                current_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
+
+                                # Click nút tìm kiếm
                                 search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                                # Scroll đến nút
                                 driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
-                                time.sleep(0.5)
-
-                                # Thử click bằng JavaScript
                                 driver.execute_script("arguments[0].click();", search_button)
-                                print("Đã nhấp nút tìm kiếm")
+                                print("Đã click nút tìm kiếm")
 
-                                # Đợi preloader xuất hiện
-                                try:
-                                    preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-                                except:
-                                    print("Không tìm thấy preloader, tiếp tục kiểm tra kết quả")
+                                def is_search_complete():
+                                    try:
+                                        # Kiểm tra preloader đã biến mất
+                                        if driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                                            return False
 
-                                # Đợi preloader biến mất (nếu có)
-                                try:
-                                    wait.until(EC.invisibility_of_element(preloader))
-                                except:
-                                    pass
+                                        # Kiểm tra bảng đã xuất hiện
+                                        table = driver.find_element(By.ID, "TBLDANHSACH")
+                                        if not table:
+                                            return False
 
-                                # Đợi bảng kết quả xuất hiện và có sự thay đổi
-                                try:
-                                    # Đợi bảng xuất hiện
-                                    table = wait.until(EC.presence_of_element_located((By.ID, "TBLDANHSACH")))
+                                        # Kiểm tra có dữ liệu mới hoặc thông báo không có dữ liệu
+                                        new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
+                                        has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
 
-                                    # Đợi có ít nhất một row mới hoặc thông báo không có dữ liệu
-                                    wait.until(lambda driver: (
-                                        len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")) > len(rows)
-                                        or driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty")
-                                    ))
-                                    rows = table.find_elements(By.TAG_NAME, "tr")
-                                    print("Trang đã load xong với kết quả mới")
-                                    break
+                                        if new_rows != current_rows or has_no_data:
+                                            # Kiểm tra footer để đảm bảo dữ liệu đã load xong
+                                            footer = driver.find_element(By.CLASS_NAME, "dataTables_info")
+                                            if footer and ("showing" in footer.text.lower() or "hiển thị" in footer.text.lower()):
+                                                return True
 
-                                except TimeoutException:
-                                    raise Exception("Timeout chờ kết quả tìm kiếm")
+                                        return False
+
+                                    except Exception:
+                                        return False
+
+                                # Đợi với timeout 30 giây nhưng phản ứng nhanh khi có kết quả
+                                start_time = time.time()
+                                while time.time() - start_time < 30:
+                                    if is_search_complete():
+                                        print(f"Tìm kiếm hoàn tất sau {time.time() - start_time:.1f} giây")
+                                        rows = driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")
+                                        return True
+                                    time.sleep(0.1)  # Check mỗi 100ms
+
+                                raise TimeoutException("Timeout chờ kết quả tìm kiếm")
 
                             except Exception as e:
                                 retry_count += 1
-                                print(f"Lần thử {retry_count}: Không thể hoàn thành tìm kiếm. Đang thử lại...")
-                                time.sleep(1)
+                                print(f"Lần thử {retry_count}: {str(e)}")
                                 if retry_count == max_retries:
-                                    raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử: {str(e)}")
+                                    raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
+                                time.sleep(1)
 
                     matched_results = []
                     for row in rows[1:]:  # Bỏ qua row đầu tiên (header)

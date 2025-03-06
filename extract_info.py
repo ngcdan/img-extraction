@@ -2,8 +2,6 @@ import os
 import io
 from datetime import datetime
 from pdfminer.high_level import extract_text
-from google_drive_utils import upload_file_to_drive
-from google_sheet_utils import append_to_google_sheet
 
 def extract_text_from_pdf(pdf_path):
     """Trích xuất văn bản từ file PDF."""

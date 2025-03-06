@@ -274,10 +274,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     min_date = parse_date(customs['min_date'])
 
 
-                    # Tìm bảng và trích xuất số tờ khai
-                    table = driver.find_element(By.ID, "TBLDANHSACH")
-                    rows = table.find_elements(By.TAG_NAME, "tr")
-
                     # Kiểm tra nếu min_date bé hơn ngày đầu tháng
                     if min_date < first_day_of_month:
                         # Điền form tìm kiếm
@@ -324,12 +320,8 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                         new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
                                         has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
 
-                                        if new_rows != current_rows or has_no_data:
-                                            # Kiểm tra footer để đảm bảo dữ liệu đã load xong
-                                            footer = driver.find_element(By.CLASS_NAME, "dataTables_info")
-                                            if footer and ("showing" in footer.text.lower() or "hiển thị" in footer.text.lower()):
-                                                return True
-
+                                        if new_rows > 0 or has_no_data:
+                                            return True
                                         return False
 
                                     except Exception:
@@ -341,7 +333,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                 while time.time() - start_time < 30:
                                     if is_search_complete():
                                         print(f"Tìm kiếm hoàn tất sau {time.time() - start_time:.1f} giây")
-                                        rows = driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")
                                         search_completed = True
                                         break
                                     time.sleep(0.1)  # Check mỗi 100ms
@@ -357,6 +348,10 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                 if retry_count == max_retries:
                                     raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
                                 time.sleep(1)
+
+                    # Tìm bảng và trích xuất số tờ khai
+                    table = driver.find_element(By.ID, "TBLDANHSACH")
+                    rows = table.find_elements(By.TAG_NAME, "tr")
 
                     matched_results = []
                     for row in rows[1:]:  # Bỏ qua row đầu tiên (header)

@@ -65,6 +65,9 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         if not driver:
             raise Exception("Không thể khởi tạo Chrome driver")
 
+        # Create a reusable WebDriverWait object
+        wait = WebDriverWait(driver, 10)
+
         # Danh sách lưu kết quả trích xuất và upload
         extracted_results = []
         drive_upload_results = []
@@ -179,16 +182,13 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     session.verify = False
                     success_count = 0
 
-                    # Mở tab mới và login
+                    # Open new tab and login
                     driver.execute_script("window.open('about:blank', '_blank');")
                     driver.switch_to.window(driver.window_handles[-1])
 
-                    # Login process
+                    # Optimize login process
                     login_success = False
-                    cookies_loaded = load_cookies(driver, tax_number)
-
-                    # Kiểm tra URL sau khi chuyển hướng
-                    if cookies_loaded:
+                    if load_cookies(driver, tax_number):
                         driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
                         login_success = "dang-nhap" not in driver.current_url
 
@@ -202,34 +202,30 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     if not login_success:
                         raise Exception(f"Không thể đăng nhập với MST {tax_number}")
 
-                    # Truy cập trang tìm kiếm
+                    # Access search page
                     driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
-                    time.sleep(3)
 
-                    wait = WebDriverWait(driver, 20)
-
+                    # Đợi cho đến khi preloader biến mất (nếu có)
                     try:
-                        # Đợi cho đến khi preloader biến mất (nếu có)
-                        try:
-                            preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-                            wait.until(EC.invisibility_of_element(preloader))
-                        except:
-                            print("Không tìm thấy preloader, tiếp tục...")
+                        print("check preloader...")
+                        preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
+                        wait.until(EC.invisibility_of_element(preloader))
+                    except:
+                        print("Không tìm thấy preloader, tiếp tục...")
 
-                        # Đợi cho đến khi bảng xuất hiện và có thể tương tác được
-                        table = wait.until(
-                            EC.presence_of_element_located((By.ID, "TBLDANHSACH"))
-                        )
+                    # Wait for table to be interactive
+                    table = wait.until(
+                        EC.presence_of_element_located((By.ID, "TBLDANHSACH"))
+                    )
 
-                        # Đợi thêm để đảm bảo bảng đã load xong dữ liệu
-                        wait.until(
-                            lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")) > 0
-                            or driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty")
-                        )
-                    except TimeoutException:
-                        raise Exception("Timeout: Trang không load hoàn tất sau 20 giây")
-                    except Exception as e:
-                        raise Exception(f"Lỗi khi đợi trang load: {str(e)}")
+                    # Wait for table to load data
+                    wait.until(
+                        lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")) > 0
+                    )
+
+                    # Tìm bảng và trích xuất số tờ khai
+                    table = driver.find_element(By.ID, "TBLDANHSACH")
+                    rows = table.find_elements(By.TAG_NAME, "tr")
 
                     # get first customs
                     customs = customs_numbers[0]
@@ -238,11 +234,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     today = datetime.now()
                     first_day_of_month = today.replace(day=1)
                     min_date = parse_date(customs['min_date'])
-
-
-                    # Tìm bảng và trích xuất số tờ khai
-                    table = driver.find_element(By.ID, "TBLDANHSACH")
-                    rows = table.find_elements(By.TAG_NAME, "tr")
 
                     # Kiểm tra nếu min_date bé hơn ngày đầu tháng
                     if min_date < first_day_of_month:
@@ -290,7 +281,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                     # Đợi có ít nhất một row mới hoặc thông báo không có dữ liệu
                                     wait.until(lambda driver: (
                                         len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")) > len(rows)
-                                        or driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty")
                                     ))
                                     rows = table.find_elements(By.TAG_NAME, "tr")
                                     print("Trang đã load xong với kết quả mới")
@@ -357,14 +347,14 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                         raise Exception("Số lượng biên lai khớp không bằng số lượng tờ khai cần xử lý")
 
-                    # Xử lý theo batch, mỗi batch 5 tab
-                    batch_size = 5
+                    # Xử lý theo batch, mỗi batch 2 tab
+                    batch_size = 2
                     for i in range(0, len(matched_results), batch_size):
                         batch = matched_results[i:i + batch_size]
                         current_handle = driver.current_window_handle
                         opened_tabs = {}  # Lưu mapping giữa drive_link và handle
 
-                        # Mở nhiều tab cùng lúc
+                        # Mở 2 tab cùng lúc
                         for invoice_info in batch:
                             invoice_url = f"http://thuphi.haiphong.gov.vn:8224/Viewer/HoaDonViewer.aspx?mhd={invoice_info['drive_link']}"
                             driver.execute_script(f"window.open('{invoice_url}', '_blank');")
@@ -372,21 +362,38 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                             opened_tabs[invoice_info['drive_link']] = {
                                 'handle': new_handle,
                                 'invoice_info': invoice_info,
-                                'retry_count': 0
+                                'retry_count': 0,
+                                'processed': False
                             }
 
-                        # Đợi 2 giây cho tất cả các tab bắt đầu load
-                        time.sleep(2)
+                        # Wait for all tabs to open
+                        wait.until(lambda d: len(d.window_handles) == len(batch) + 1)
 
-                        # Xử lý từng tab theo thứ tự drive_link
-                        sorted_tabs = sorted(opened_tabs.items(), key=lambda x: x[0])
-                        failed_tabs = {}
+                        # Xử lý các tab cho đến khi tất cả đều được xử lý
+                        while any(not tab['processed'] for tab in opened_tabs.values()):
+                            for drive_link, tab_info in opened_tabs.items():
+                                if tab_info['processed']:
+                                    continue
 
-                        for drive_link, tab_info in sorted_tabs:
-                            max_retries = 3
-                            while tab_info['retry_count'] < max_retries:
                                 try:
                                     driver.switch_to.window(tab_info['handle'])
+
+                                    # Kiểm tra xem trang đã load xong chưa
+                                    page_ready = False
+                                    try:
+                                        page_ready = wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
+                                    except:
+                                        continue  # Skip to next tab if this one isn't ready
+
+                                    if not page_ready:
+                                        continue
+
+                                    # Check and wait for preloader
+                                    try:
+                                        preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
+                                        wait.until(EC.invisibility_of_element(preloader))
+                                    except:
+                                        pass  # Preloader might not exist
 
                                     print_options = {
                                         'landscape': False,
@@ -411,26 +418,24 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                         if append_to_google_sheet_new(invoice_info):
                                             success_count += 1
                                             driver.close()
-                                            break
+                                            tab_info['processed'] = True
                                     else:
                                         raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
 
                                 except Exception as e:
                                     print(f"Lỗi khi xử lý biên lai {tab_info['invoice_info']['invoice_no']} (lần {tab_info['retry_count'] + 1}): {str(e)}")
                                     tab_info['retry_count'] += 1
-                                    if tab_info['retry_count'] >= max_retries:
-                                        failed_tabs[drive_link] = tab_info
-                                        print(f"Không thể xử lý biên lai {tab_info['invoice_info']['invoice_no']} sau {max_retries} lần thử")
-                                    time.sleep(1)
+                                    if tab_info['retry_count'] >= 3:  # max_retries = 3
+                                        print(f"Không thể xử lý biên lai {tab_info['invoice_info']['invoice_no']} sau 3 lần thử")
+                                        tab_info['processed'] = True  # Mark as processed to move on
+                                        try:
+                                            driver.close()
+                                        except:
+                                            pass
 
-                        # Đóng các tab thất bại và chuyển về tab gốc
-                        for tab_info in failed_tabs.values():
-                            try:
-                                driver.switch_to.window(tab_info['handle'])
-                                driver.close()
-                            except:
-                                pass
+                            time.sleep(0.5)  # Short delay before checking tabs again
 
+                        # Switch back to main handle after processing batch
                         driver.switch_to.window(current_handle)
 
                     download_results.append({

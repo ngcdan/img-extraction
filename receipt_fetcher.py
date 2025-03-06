@@ -65,9 +65,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         if not driver:
             raise Exception("Không thể khởi tạo Chrome driver")
 
-        # Create a reusable WebDriverWait object
-        wait = WebDriverWait(driver, 10)
-
         # Danh sách lưu kết quả trích xuất và upload
         extracted_results = []
         drive_upload_results = []
@@ -174,13 +171,16 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     session.verify = False
                     success_count = 0
 
-                    # Open new tab and login
+                    # Mở tab mới và login
                     driver.execute_script("window.open('about:blank', '_blank');")
                     driver.switch_to.window(driver.window_handles[-1])
 
-                    # Optimize login process
+                    # Login process
                     login_success = False
-                    if load_cookies(driver, tax_number):
+                    cookies_loaded = load_cookies(driver, tax_number)
+
+                    # Kiểm tra URL sau khi chuyển hướng
+                    if cookies_loaded:
                         driver.get("http://thuphi.haiphong.gov.vn:8222/Home")
                         login_success = "dang-nhap" not in driver.current_url
 
@@ -194,14 +194,13 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     if not login_success:
                         raise Exception(f"Không thể đăng nhập với MST {tax_number}")
 
-                    # Access search page
+                    # Truy cập trang tìm kiếm
                     driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
 
                     # Tăng thời gian chờ tối đa lên 60 giây
                     wait = WebDriverWait(driver, 60)
                     short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
 
-                    # Đợi cho đến khi preloader biến mất (nếu có)
                     try:
                         # Đợi cho đến khi preloader xuất hiện (nếu có)
                         try:
@@ -237,6 +236,11 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     today = datetime.now()
                     first_day_of_month = today.replace(day=1)
                     min_date = parse_date(customs['min_date'])
+
+
+                    # Tìm bảng và trích xuất số tờ khai
+                    table = driver.find_element(By.ID, "TBLDANHSACH")
+                    rows = table.find_elements(By.TAG_NAME, "tr")
 
                     # Kiểm tra nếu min_date bé hơn ngày đầu tháng
                     if min_date < first_day_of_month:
@@ -284,6 +288,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                     # Đợi có ít nhất một row mới hoặc thông báo không có dữ liệu
                                     wait.until(lambda driver: (
                                         len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")) > len(rows)
+                                        or driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty")
                                     ))
                                     rows = table.find_elements(By.TAG_NAME, "tr")
                                     print("Trang đã load xong với kết quả mới")
@@ -808,4 +813,48 @@ def is_table_loaded_with_data(driver, short_wait):
     except Exception as e:
         print(f"Lỗi khi kiểm tra trạng thái bảng: {str(e)}")
         return False
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

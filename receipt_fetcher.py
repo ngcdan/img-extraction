@@ -70,6 +70,8 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         drive_upload_results = []
         download_results = []
 
+        cached_extracted_files = {}  # Dictionary để lưu file đã được trích xuất
+
         # 1. Trích xuất thông tin từ tất cả các file trước
         for file_path in files:
             try:
@@ -94,34 +96,24 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                         'source_file': os.path.basename(file_path)
                     })
 
-                    # Upload file lên Drive
-                    ngay_formatted = header_info['date'].replace('/', '') if header_info.get('date') else datetime.now().strftime('%d%m%Y')
-                    upload_result = upload_file_to_drive(
-                        file_content=file_content,
-                        filename=os.path.basename(file_path),
-                        parent_folder_date=ngay_formatted
-                    )
-
-                    if upload_result['success']:
-                        header_info['drive_file_path'] = upload_result['file_path']
-                        drive_upload_results.append({
-                            'file': os.path.basename(file_path),
-                            'status': 'success',
-                            'path': upload_result['file_path']
-                        })
+                    # Cache file với key là customs_number
+                    customs_no = header_info.get('customs_number')
+                    if customs_no:
+                        cached_extracted_files[customs_no] = {
+                            'file_content': file_content,
+                            'header_info': header_info
+                        }
+                        extracted_results.append(header_info)
                     else:
-                        drive_upload_results.append({
-                            'file': os.path.basename(file_path),
-                            'status': 'error',
-                            'error': upload_result.get('error', 'Unknown error')
-                        })
-                    extracted_results.append(header_info)
+                        print(f"Không tìm thấy customs_number trong file: {file_path}")
+
             except Exception as e:
                 print(f"Lỗi xử lý file {file_path}: {str(e)}")
                 continue
 
         if not extracted_results:
             raise ValueError("Không có dữ liệu được trích xuất từ các file")
+
 
         # 2. Group results by tax_number and customs_number
         grouped_results = {}
@@ -204,30 +196,36 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                     # Truy cập trang tìm kiếm
                     driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
-                    time.sleep(3)
 
-                    wait = WebDriverWait(driver, 20)
+                    # Tăng thời gian chờ tối đa lên 60 giây
+                    wait = WebDriverWait(driver, 60)
+                    short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
 
                     try:
-                        # Đợi cho đến khi preloader biến mất (nếu có)
+                        # Đợi cho đến khi preloader xuất hiện (nếu có)
                         try:
-                            preloader = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-                            wait.until(EC.invisibility_of_element(preloader))
+                            preloader = short_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
                         except:
-                            print("Không tìm thấy preloader, tiếp tục...")
+                            print("Không tìm thấy preloader")
 
-                        # Đợi cho đến khi bảng xuất hiện và có thể tương tác được
-                        table = wait.until(
-                            EC.presence_of_element_located((By.ID, "TBLDANHSACH"))
-                        )
+                        # Đợi cho đến khi preloader biến mất và bảng xuất hiện với dữ liệu
+                        start_time = time.time()
+                        while time.time() - start_time < 60:  # Tối đa 60 giây
+                            try:
+                                # Kiểm tra preloader đã biến mất chưa
+                                if not driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                                    # Kiểm tra bảng đã load xong chưa
+                                    if is_table_loaded_with_data(driver, short_wait):
+                                        print(f"Trang đã load hoàn tất sau {time.time() - start_time:.1f} giây")
+                                        break
+                            except:
+                                pass
+                            time.sleep(0.5)  # Đợi 500ms trước khi check lại
 
-                        # Đợi thêm để đảm bảo bảng đã load xong dữ liệu
-                        wait.until(
-                            lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr")) > 0
-                            or driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty")
-                        )
-                    except TimeoutException:
-                        raise Exception("Timeout: Trang không load hoàn tất sau 20 giây")
+                        # Kiểm tra lần cuối để đảm bảo dữ liệu đã sẵn sàng
+                        if not is_table_loaded_with_data(driver, short_wait):
+                            raise Exception("Không thể load dữ liệu bảng sau 60 giây")
+
                     except Exception as e:
                         raise Exception(f"Lỗi khi đợi trang load: {str(e)}")
 
@@ -357,37 +355,27 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                         raise Exception("Số lượng biên lai khớp không bằng số lượng tờ khai cần xử lý")
 
-                    # Xử lý theo batch, mỗi batch 5 tab
-                    batch_size = 5
-                    for i in range(0, len(matched_results), batch_size):
-                        batch = matched_results[i:i + batch_size]
-                        current_handle = driver.current_window_handle
-                        opened_tabs = {}  # Lưu mapping giữa drive_link và handle
+                    # Xử lý từng tài liệu một
+                    success_count = 0
+                    cached_files = {}  # Dictionary để lưu file đã download
 
-                        # Mở nhiều tab cùng lúc
-                        for invoice_info in batch:
+                    for invoice_info in matched_results:
+                        try:
+                            # Mở tab mới
                             invoice_url = f"http://thuphi.haiphong.gov.vn:8224/Viewer/HoaDonViewer.aspx?mhd={invoice_info['drive_link']}"
                             driver.execute_script(f"window.open('{invoice_url}', '_blank');")
                             new_handle = driver.window_handles[-1]
-                            opened_tabs[invoice_info['drive_link']] = {
-                                'handle': new_handle,
-                                'invoice_info': invoice_info,
-                                'retry_count': 0
-                            }
+                            driver.switch_to.window(new_handle)
 
-                        # Đợi 2 giây cho tất cả các tab bắt đầu load
-                        time.sleep(2)
-
-                        # Xử lý từng tab theo thứ tự drive_link
-                        sorted_tabs = sorted(opened_tabs.items(), key=lambda x: x[0])
-                        failed_tabs = {}
-
-                        for drive_link, tab_info in sorted_tabs:
+                            # Đợi trang load xong
+                            retry_count = 0
                             max_retries = 3
-                            while tab_info['retry_count'] < max_retries:
+                            while retry_count < max_retries:
                                 try:
-                                    driver.switch_to.window(tab_info['handle'])
+                                    # Đợi cố định 2 giây để trang load
+                                    time.sleep(2)
 
+                                    # Tạo PDF và cache
                                     print_options = {
                                         'landscape': False,
                                         'displayHeaderFooter': False,
@@ -397,41 +385,96 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                     pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
                                     pdf_data = base64.b64decode(pdf['data'])
 
-                                    invoice_info = tab_info['invoice_info']
-                                    ngay_formatted = invoice_info['ngay'].replace('/', '') if invoice_info.get('ngay') else datetime.now().strftime('%d%m%Y')
+                                    # Kiểm tra kích thước PDF
+                                    if len(pdf_data) < 1000:  # Nếu PDF quá nhỏ, có thể chưa load xong
+                                        raise Exception("PDF size too small, page might not be fully loaded")
 
-                                    # Upload lên Drive
-                                    upload_result = upload_file_to_drive(
-                                        file_content=pdf_data,
-                                        filename=f"CSHT_{invoice_info['invoice_no']}.pdf",
-                                        parent_folder_date=ngay_formatted
-                                    )
-
-                                    if upload_result['success']:
-                                        if append_to_google_sheet_new(invoice_info):
-                                            success_count += 1
-                                            driver.close()
-                                            break
-                                    else:
-                                        raise Exception(f"Lỗi upload file: {upload_result.get('error')}")
+                                    # Cache file đã download
+                                    cached_files[invoice_info['invoice_no']] = {
+                                        'pdf_data': pdf_data,
+                                        'invoice_info': invoice_info
+                                    }
+                                    print(f"Đã download và cache biên lai {invoice_info['invoice_no']}")
+                                    break
 
                                 except Exception as e:
-                                    print(f"Lỗi khi xử lý biên lai {tab_info['invoice_info']['invoice_no']} (lần {tab_info['retry_count'] + 1}): {str(e)}")
-                                    tab_info['retry_count'] += 1
-                                    if tab_info['retry_count'] >= max_retries:
-                                        failed_tabs[drive_link] = tab_info
-                                        print(f"Không thể xử lý biên lai {tab_info['invoice_info']['invoice_no']} sau {max_retries} lần thử")
-                                    time.sleep(1)
+                                    retry_count += 1
+                                    print(f"Lỗi khi download biên lai {invoice_info['invoice_no']} (lần {retry_count}): {str(e)}")
+                                    if retry_count >= max_retries:
+                                        print(f"Không thể download biên lai {invoice_info['invoice_no']} sau {max_retries} lần thử")
+                                    time.sleep(2)  # Tăng thời gian chờ lên 2 giây trước khi thử lại
 
-                        # Đóng các tab thất bại và chuyển về tab gốc
-                        for tab_info in failed_tabs.values():
+                        except Exception as e:
+                            print(f"Lỗi không mong đợi khi download biên lai {invoice_info['invoice_no']}: {str(e)}")
+
+                        finally:
+                            # Đóng tab hiện tại và chuyển về tab chính
                             try:
-                                driver.switch_to.window(tab_info['handle'])
                                 driver.close()
+                                driver.switch_to.window(driver.window_handles[0])
                             except:
                                 pass
 
-                        driver.switch_to.window(current_handle)
+                    # Sau khi download xong tất cả, tiến hành upload và append sheet
+                    print(f"\nĐã download xong {len(cached_files)} biên lai. Bắt đầu upload lên Drive...")
+
+                    for invoice_no, cache_data in cached_files.items():
+                        try:
+                            pdf_data = cache_data['pdf_data']
+                            invoice_info = cache_data['invoice_info']
+
+                            # Format ngày cho tên file
+                            ngay_formatted = invoice_info['ngay'].replace('/', '') if invoice_info.get('ngay') else datetime.now().strftime('%d%m%Y')
+
+                            # Upload lên Drive
+                            upload_result = upload_file_to_drive(
+                                file_content=pdf_data,
+                                filename=f"CSHT_{invoice_no}.pdf",
+                                parent_folder_date=ngay_formatted
+                            )
+
+                            print(json.dumps(invoice_info, indent=2, ensure_ascii=False))
+
+                            customs_no = invoice_info.get('custom_no')
+                            if customs_no and customs_no in cached_extracted_files:
+                                try:
+                                    cached_extracted_data = cached_extracted_files[customs_no]
+                                    file_content = cached_extracted_data['file_content']
+                                    header_info = cached_extracted_data['header_info']
+                                    filename = header_info['source_file']
+
+                                    upload_result = upload_file_to_drive(
+                                        file_content=file_content,
+                                        filename=filename,
+                                        parent_folder_date=ngay_formatted  # Sử dụng cùng ngày với file biên lai
+                                    )
+
+                                    if upload_result['success']:
+                                        header_info['drive_file_path'] = upload_result['file_path']
+                                        drive_upload_results.append({
+                                            'file': filename,
+                                            'status': 'success',
+                                            'path': upload_result['file_path']
+                                        })
+                                    else:
+                                        drive_upload_results.append({
+                                            'file': filename,
+                                            'status': 'error',
+                                            'error': upload_result.get('error', 'Unknown error')
+                                        })
+                                except Exception as e:
+                                    print(f"Lỗi upload file cho customs_no {customs_no}: {str(e)}")
+
+                            # Upload biên lai
+                            if upload_result['success']:
+                                if append_to_google_sheet_new(invoice_info):
+                                    success_count += 1
+                                    print(f"Đã upload và append sheet thành công cho biên lai {invoice_no}")
+                            else:
+                                print(f"Lỗi upload file: {upload_result.get('error')}")
+
+                        except Exception as e:
+                            print(f"Lỗi khi upload/append biên lai {invoice_no}: {str(e)}")
 
                     download_results.append({
                         'tax_number': tax_number,
@@ -719,8 +762,55 @@ def save_captcha_and_label(driver, captcha_text):
         print(f"Lỗi khi lưu captcha và label: {e}")
         return False
 
+def is_table_loaded_with_data(driver, short_wait):
+    """
+    Kiểm tra xem bảng dữ liệu đã load hoàn tất và có dữ liệu chưa
 
+    Args:
+        driver: WebDriver instance
+        short_wait: WebDriverWait instance với timeout ngắn
 
+    Returns:
+        bool: True nếu bảng đã load hoàn tất và có dữ liệu/thông báo empty
+    """
+    try:
+        # 1. Kiểm tra sự tồn tại của bảng
+        table = short_wait.until(EC.presence_of_element_located((By.ID, "TBLDANHSACH")))
+        if not table:
+            return False
 
+        # 2. Kiểm tra xem bảng có đang trong trạng thái loading không
+        loading_elements = driver.find_elements(By.CSS_SELECTOR, ".dataTables_processing")
+        if loading_elements and loading_elements[0].is_displayed():
+            return False
 
+        # 3. Kiểm tra các row trong bảng
+        rows = table.find_elements(By.TAG_NAME, "tr")
+
+        # Nếu có nhiều hơn 1 row (tính cả header), tức là có dữ liệu
+        if len(rows) > 1:
+            # Kiểm tra thêm xem row đầu tiên (sau header) có cells không
+            if len(rows[1].find_elements(By.TAG_NAME, "td")) > 0:
+                return True
+
+        # 4. Kiểm tra thông báo "No data available"
+        empty_messages = driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty")
+        if empty_messages:
+            # Kiểm tra xem thông báo có hiển thị không
+            if empty_messages[0].is_displayed():
+                return True
+
+        # 5. Kiểm tra footer của bảng
+        footer_info = driver.find_elements(By.CSS_SELECTOR, ".dataTables_info")
+        if footer_info:
+            footer_text = footer_info[0].text.lower()
+            # Nếu footer hiển thị thông tin về số lượng bản ghi
+            if "showing" in footer_text or "hiển thị" in footer_text:
+                return True
+
+        return False
+
+    except Exception as e:
+        print(f"Lỗi khi kiểm tra trạng thái bảng: {str(e)}")
+        return False
 

@@ -221,9 +221,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                 long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
 
                                 if fill_login_info(driver, tax_number, tax_number):
-                                    login_success = collect_captcha_if_login(driver)
-                                    if login_success:
-                                        save_cookies(driver, tax_number)
+                                    login_success = True
                             except Exception as e:
                                 print(f"Lỗi trong quá trình login: {str(e)}")
 
@@ -575,60 +573,144 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             'error': str(e)
         }
 
-def fill_login_info(driver, username, password, max_retries=3):
-    """Điền thông tin đăng nhập với retry và explicit wait"""
-    wait = WebDriverWait(driver, 20)  # Đợi tối đa 10 giây
-    retry_count = 0
+def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút timeout
+    """Điền thông tin đăng nhập và đợi user login thành công"""
+    wait = WebDriverWait(driver, 10)
     login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
+    home_url = "http://thuphi.haiphong.gov.vn:8222/Home"
+    start_time = time.time()
+    last_captcha = None  # Cache captcha cuối cùng
 
-    while retry_count < max_retries:
+    def is_login_successful():
+        """Kiểm tra đăng nhập thành công"""
+        return (driver.current_url == home_url or
+                (driver.current_url != login_url and "dang-nhap" not in driver.current_url))
+
+    def needs_refill():
+        """Kiểm tra xem có cần điền lại thông tin không"""
         try:
-            # Kiểm tra URL hiện tại
-            current_url = driver.current_url
-            if current_url != login_url:
-                print(f"URL hiện tại không phải trang đăng nhập: {current_url}")
-                # Tìm tab có URL đăng nhập
-                login_tab_found = False
-                for handle in driver.window_handles:
-                    driver.switch_to.window(handle)
-                    if driver.current_url == login_url:
-                        print("Đã tìm thấy tab đăng nhập")
-                        login_tab_found = True
-                        break
-
-                if not login_tab_found:
-                    print("Không tìm thấy tab đăng nhập")
-                    return False
-
-            # Đợi cho đến khi form login xuất hiện
-            wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-            wait.until(EC.element_to_be_clickable((By.ID, "form-username")))
-
-            # Tìm và điền username
             username_input = driver.find_element(By.ID, "form-username")
+            return not username_input.get_attribute('value')
+        except:
+            return False
+
+    def get_current_captcha():
+        """Lấy giá trị captcha hiện tại"""
+        try:
+            captcha_input = driver.find_element(By.ID, "CaptchaInputText")
+            return captcha_input.get_attribute('value')
+        except:
+            return None
+
+    def fill_form():
+        """Điền thông tin form"""
+        try:
+            # Đợi và điền username
+            username_input = wait.until(EC.presence_of_element_located((By.ID, "form-username")))
             username_input.clear()
             username_input.send_keys(username)
             print("Đã điền username")
 
             # Đợi và điền password
-            wait.until(EC.presence_of_element_located((By.ID, "form-password")))
-            password_input = driver.find_element(By.ID, "form-password")
+            password_input = wait.until(EC.presence_of_element_located((By.ID, "form-password")))
             password_input.clear()
             password_input.send_keys(password)
             print("Đã điền password")
 
+            # Đảm bảo focus vào ô captcha
+            try:
+                captcha_input = driver.find_element(By.ID, "CaptchaInputText")
+                captcha_input.click()
+            except:
+                pass
+
             return True
+        except Exception as e:
+            print(f"Lỗi khi điền form: {str(e)}")
+            return False
 
-        except (TimeoutException, NoSuchElementException) as e:
-            retry_count += 1
-            print(f"Lần thử {retry_count}: Không tìm thấy form đăng nhập. Đang thử lại...")
+    # Thêm script theo dõi captcha
+    js_script = """
+    window.captchaValue = '';
+    window.getCaptchaValue = function() {
+        return window.captchaValue;
+    };
+    const captchaInput = document.getElementById('CaptchaInputText');
+    if (captchaInput) {
+        captchaInput.addEventListener('blur', function() {
+            window.captchaValue = this.value;
+        });
+        captchaInput.addEventListener('input', function() {
+            if (this.value.length >= 5) {
+                window.captchaValue = this.value;
+            }
+        });
+    }
+    """
+    try:
+        driver.execute_script(js_script)
+    except:
+        print("Không thể thêm script theo dõi captcha")
 
-            if retry_count < max_retries:
-                driver.get(login_url)  # Refresh về trang đăng nhập
-                time.sleep(2)
-            else:
-                print(f"Lỗi sau {max_retries} lần thử: {str(e)}")
-                raise Exception(f"Không thể điền thông tin đăng nhập sau {max_retries} lần thử")
+    # Đảm bảo đang ở trang đăng nhập
+    if driver.current_url != login_url:
+        print(f"Chuyển hướng tới trang đăng nhập từ: {driver.current_url}")
+        driver.get(login_url)
+        time.sleep(1)
+
+    # Điền thông tin lần đầu
+    if not fill_form():
+        raise Exception("Không thể điền thông tin đăng nhập lần đầu")
+
+    # Loop kiểm tra liên tục
+    while time.time() - start_time < max_wait_time:
+        try:
+            # Cập nhật captcha cuối cùng
+            current_captcha = get_current_captcha()
+            if current_captcha and len(current_captcha) >= 5:
+                last_captcha = current_captcha
+
+            # Kiểm tra đăng nhập thành công
+            if is_login_successful():
+                print("Đăng nhập thành công!")
+                if last_captcha:
+                    print(f"Lưu captcha cuối cùng: {last_captcha}")
+                    save_captcha_and_label(driver, last_captcha)
+                save_cookies(driver, username)
+                return True
+
+            # Kiểm tra URL hiện tại
+            current_url = driver.current_url
+
+            # Nếu đang ở trang login
+            if "dang-nhap" in current_url:
+                # Kiểm tra thông báo lỗi
+                error_messages = driver.find_elements(By.CLASS_NAME, "validation-summary-errors")
+                if error_messages and any(msg.is_displayed() for msg in error_messages):
+                    print(f"Phát hiện lỗi đăng nhập: {error_messages[0].text}")
+                    # Điền lại thông tin nếu form trống
+                    if needs_refill():
+                        print("Điền lại thông tin đăng nhập...")
+                        fill_form()
+
+                # Kiểm tra và điền lại nếu form trống
+                elif needs_refill():
+                    print("Form trống, điền lại thông tin...")
+                    fill_form()
+
+            time.sleep(0.5)  # Giảm tải CPU
+
+        except Exception as e:
+            print(f"Lỗi khi kiểm tra trạng thái: {str(e)}")
+            # Nếu có lỗi, thử refresh trang và điền lại
+            try:
+                driver.get(login_url)
+                time.sleep(1)
+                fill_form()
+            except:
+                pass
+
+    raise Exception(f"Hết thời gian chờ ({max_wait_time}s) - Người dùng chưa đăng nhập thành công")
 
 def initialize_chrome():
     """Khởi tạo Chrome và mở trang web"""
@@ -648,6 +730,45 @@ def initialize_chrome():
                 chrome_path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
         else:  # macOS
             chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+
+        if not os.path.exists(chrome_path):
+            raise Exception(f"Không tìm thấy Chrome tại {chrome_path}")
+
+        # Cleanup các process Chrome debug đang chạy
+        try:
+            if platform.system() == 'Windows':
+                os.system('taskkill /f /im "chrome.exe" /fi "windowtitle eq Chrome Debug"')
+            else:
+                os.system('pkill -f "Chrome.*--remote-debugging-port=9222"')
+            time.sleep(2)
+        except:
+            pass
+
+        # Cleanup ChromeDriver processes
+        try:
+            if platform.system() == 'Windows':
+                os.system('taskkill /f /im chromedriver.exe')
+            else:
+                os.system('pkill -f chromedriver')
+            time.sleep(2)
+        except:
+            pass
+
+        # Kiểm tra và tạo thư mục debug nếu cần
+        debug_dir = os.path.join(os.path.expanduser('~'), '.chrome-debug')
+        if not os.path.exists(debug_dir):
+            os.makedirs(debug_dir)
+
+        # Thiết lập Chrome options
+        chrome_options = Options()
+        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--start-maximized')
 
         # Kiểm tra xem Chrome có đang chạy với debug port không
         chrome_running = False

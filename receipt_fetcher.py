@@ -226,31 +226,26 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
             # Login process
             login_success = False
-            cookies_loaded = load_cookies(driver, tax_number)
 
-            # Kiểm tra URL sau khi chuyển hướng
-            if cookies_loaded:
-                if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/Home"):
-                    try:
-                        # Đợi cho đến khi có thể tương tác với trang
-                        long_wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
-                        login_success = "dang-nhap" not in driver.current_url
-                    except:
-                        print("Timeout khi đợi trang Home load hoàn tất")
+            # cookies_loaded = load_cookies(driver, tax_number)
+            # # Kiểm tra URL sau khi chuyển hướng
+            # if cookies_loaded:
+            #     if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/Home"):
+            #         try:
+            #             # Đợi cho đến khi có thể tương tác với trang
+            #             long_wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
+            #             login_success = "dang-nhap" not in driver.current_url
+            #         except:
+            #             print("Timeout khi đợi trang Home load hoàn tất")
 
             if not login_success:
                 if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/dang-nhap"):
-                    try:
-                        # Đợi form login xuất hiện và có thể tương tác
-                        long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-
-                        if fill_login_info(driver, tax_number, tax_number):
-                            login_success = True
-                    except Exception as e:
-                        print(f"Lỗi trong quá trình login: {str(e)}")
+                    long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
+                    if fill_login_info(driver, tax_number, tax_number):
+                        login_success = True
 
             if not login_success:
-                raise Exception(f"Không thể đăng nhập với MST {tax_number} sau nhiều lần thử")
+                raise Exception(f"Không thể đăng nhập với MST {tax_number}")
 
             # Truy cập trang tìm kiếm
             driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
@@ -260,32 +255,19 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
 
             try:
-                # Đợi cho đến khi preloader xuất hiện (nếu có)
-                try:
-                    preloader = short_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-                except:
-                    print("Không tìm thấy preloader")
+                preloader = short_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
+            except:
+                pass
 
-                # Đợi cho đến khi preloader biến mất và bảng xuất hiện với dữ liệu
-                start_time = time.time()
-                while time.time() - start_time < 60:  # Tối đa 60 giây
-                    try:
-                        # Kiểm tra preloader đã biến mất chưa
-                        if not driver.find_elements(By.CLASS_NAME, "preloader-container"):
-                            # Kiểm tra bảng đã load xong chưa
-                            if is_table_loaded_with_data(driver, short_wait):
-                                print(f"Trang đã load hoàn tất sau {time.time() - start_time:.1f} giây")
-                                break
-                    except:
-                        pass
-                    time.sleep(0.5)  # Đợi 500ms trước khi check lại
+            start_time = time.time()
+            while time.time() - start_time < 60:  # Tối đa 60 giây
+                if not driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                    if is_table_loaded_with_data(driver, short_wait):
+                        break
+                time.sleep(0.5)  # Đợi 500ms trước khi check lại
 
-                # Kiểm tra lần cuối để đảm bảo dữ liệu đã sẵn sàng
-                if not is_table_loaded_with_data(driver, short_wait):
-                    raise Exception("Không thể load dữ liệu bảng sau 60 giây")
-
-            except Exception as e:
-                raise Exception(f"Lỗi khi đợi trang load: {str(e)}")
+            if not is_table_loaded_with_data(driver, short_wait):
+                raise Exception("Không thể load dữ liệu bảng sau 60 giây")
 
             # get first customs
             customs = customs_numbers[0]
@@ -294,7 +276,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             today = datetime.now()
             first_day_of_month = today.replace(day=1)
             min_date = parse_date(customs['min_date'])
-
 
             # Kiểm tra nếu min_date bé hơn ngày đầu tháng
             if min_date < first_day_of_month:
@@ -313,35 +294,28 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                 except Exception as e:
                     raise Exception(f"Lỗi khi điền form tìm kiếm: {str(e)}")
 
-                # Thực hiện tìm kiếm với retry
                 max_retries = 3
                 retry_count = 0
                 while retry_count < max_retries:
                     try:
-                        # Click nút tìm kiếm
                         search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
                         driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
                         driver.execute_script("arguments[0].click();", search_button)
 
                         def is_search_complete():
                             try:
-                                # Kiểm tra preloader đã biến mất
                                 if driver.find_elements(By.CLASS_NAME, "preloader-container"):
                                     return False
-
-                                # Kiểm tra bảng đã xuất hiện
                                 table = driver.find_element(By.ID, "TBLDANHSACH")
                                 if not table:
                                     return False
 
-                                # Kiểm tra có dữ liệu mới hoặc thông báo không có dữ liệu
                                 new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
                                 has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
 
                                 if new_rows > 0 or has_no_data:
                                     return True
                                 return False
-
                             except Exception:
                                 return False
 
@@ -350,10 +324,9 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                         search_completed = False
                         while time.time() - start_time < 30:
                             if is_search_complete():
-                                print(f"Tìm kiếm hoàn tất sau {time.time() - start_time:.1f} giây")
                                 search_completed = True
                                 break
-                            time.sleep(0.1)  # Check mỗi 100ms
+                            time.sleep(0.1)
 
                         if search_completed:
                             break  # Thoát khỏi vòng lặp retry
@@ -362,7 +335,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                     except Exception as e:
                         retry_count += 1
-                        print(f"Lần thử {retry_count}: {str(e)}")
                         if retry_count == max_retries:
                             raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
                         time.sleep(1)
@@ -375,13 +347,9 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             for row in rows[1:]:  # Bỏ qua row đầu tiên (header)
                 try:
                     cells = row.find_elements(By.TAG_NAME, "td")
-
                     if len(cells) == 1 and "No data available" in cells[0].text:
-                        print("Không tìm thấy dữ liệu trong bảng")
                         continue
-
                     custom_no = str(cells[4].text.strip())  # Đảm bảo là string
-
                     matching_customs = next(
                         (customs for customs in customs_numbers
                             if str(customs['customs_number']) == custom_no),  # Đảm bảo là string
@@ -396,7 +364,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                         raw_series_no = cells[7].text.strip() if len(cells) > 7 else ''
                         seriesNo = raw_series_no.split('/')[-1].strip() if '/' in raw_series_no else raw_series_no
-
 
                         result = {
                             'custom_no': custom_no,
@@ -417,8 +384,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     continue
 
             if len(matched_results) != len(customs_numbers):
-
-                # Lọc ra các tờ khai chưa được khớp
                 matched_customs_numbers = {str(result['custom_no']) for result in matched_results}
                 unmatched_customs = [
                     customs for customs in customs_numbers
@@ -426,59 +391,43 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                 ]
 
                 for invoice_info in unmatched_customs:
-                    print(f"- Số tờ khai: {invoice_info['customs_number']}")
-                    print("  ---")
-                    # Điền số tờ khai và tìm kiếm
                     so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
                     so_tk_input.clear()
                     so_tk_input.send_keys(invoice_info['customs_number'])
 
-                    # Đợi và điền ngày bắt đầu
                     tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
                     tu_ngay_input.clear()
 
-                    # Đợi và điền ngày kết thúc
                     den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
                     den_ngay_input.clear()
 
-                    # Thực hiện tìm kiếm với retry
                     max_retries = 3
                     retry_count = 0
                     while retry_count < max_retries:
                         try:
-                            # Click nút tìm kiếm
                             search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
                             driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
                             driver.execute_script("arguments[0].click();", search_button)
 
                             def is_search_complete():
                                 try:
-                                    # Kiểm tra preloader đã biến mất
                                     if driver.find_elements(By.CLASS_NAME, "preloader-container"):
                                         return False
-
-                                    # Kiểm tra bảng đã xuất hiện
                                     table = driver.find_element(By.ID, "TBLDANHSACH")
                                     if not table:
                                         return False
-
-                                    # Kiểm tra có dữ liệu mới hoặc thông báo không có dữ liệu
                                     new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
                                     has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
-
                                     if new_rows > 0 or has_no_data:
                                         return True
                                     return False
-
                                 except Exception:
                                     return False
 
-                            # Đợi với timeout 30 giây nhưng phản ứng nhanh khi có kết quả
                             start_time = time.time()
                             search_completed = False
                             while time.time() - start_time < 30:
                                 if is_search_complete():
-                                    print(f"Tìm kiếm hoàn tất sau {time.time() - start_time:.1f} giây")
                                     search_completed = True
                                     break
                                 time.sleep(0.1)  # Check mỗi 100ms
@@ -490,23 +439,20 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                         except Exception as e:
                             retry_count += 1
-                            print(f"Lần thử {retry_count}: {str(e)}")
                             if retry_count == max_retries:
                                 raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
                             time.sleep(1)
-                    # Tìm bảng và trích xuất số tờ khai
+
                     table = driver.find_element(By.ID, "TBLDANHSACH")
                     rows = table.find_elements(By.TAG_NAME, "tr")
 
                     if len(rows) <= 1:  # Chỉ có header
-                        print(f"Không tìm thấy dữ liệu cho số tờ khai {customs['customs_number']}")
                         continue
 
                     first_row = rows[1]
                     cells = first_row.find_elements(By.TAG_NAME, "td")
 
                     if len(cells) == 1 and "No data available" in cells[0].text:
-                        print(f"Không tìm thấy dữ liệu cho số tờ khai {customs['customs_number']}")
                         continue
 
                     found_custom_no = str(cells[4].text.strip())
@@ -534,16 +480,12 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                         }
                         matched_results.append(result)
                     else:
-                        print(f"Kết quả tìm kiếm không khớp. Tìm: {customs['customs_number']}, Tìm thấy: {found_custom_no}")
                         continue
 
                 if len(matched_results) != len(customs_numbers):
-                    print("\nDanh sách thông tin tờ khai đã khớp:")
-                    print(json.dumps(matched_results, indent=2, ensure_ascii=False))
-
-                    print("\nDanh sách thông tin tờ khai cần xử lý:")
-                    print(json.dumps(customs_numbers, indent=2, ensure_ascii=False))
-                    raise Exception(f"Số lượng biên lai khớp không bằng số lượng tờ khai cần xử lý. Còn {len(unmatched_customs)} tờ khai chưa khớp.")
+                    print("\nDanh sách thông tin tờ khai cần xử lý:\n")
+                    print(json.dumps(unmatched_customs, indent=2, ensure_ascii=False))
+                    raise Exception(f"\nSố lượng biên lai khớp không bằng số lượng tờ khai cần xử lý. Còn {len(unmatched_customs)} tờ khai chưa khớp.\n\n\n")
 
             success_count, drive_upload_results = process_matched_results(driver, matched_results, cached_extracted_files)
 
@@ -556,9 +498,8 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
             # Redirect về trang login sau khi xử lý xong tax_number
             try:
-                clear_all_cookies_and_sessions()
+                clear_all_cookies_and_sessions(driver)
                 driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
-                time.sleep(1)  # Đợi 1 giây để đảm bảo redirect hoàn tất
             except Exception as e:
                 print(f"Lỗi khi redirect về trang login: {str(e)}")
 
@@ -597,7 +538,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             except:
                 pass
 
-def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút timeout
+def fill_login_info(driver, username, password, max_wait_time=240):  # 4 phút timeout
     """Điền thông tin đăng nhập và đợi user login thành công"""
     wait = WebDriverWait(driver, 10)
     login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
@@ -651,21 +592,32 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
             print(f"Lỗi khi điền form: {str(e)}")
             return False
 
-    # Thêm script theo dõi captcha
+    # Thêm script theo dõi captcha để tự động submit
     js_script = """
     window.captchaValue = '';
+    window.lastSubmittedCaptcha = '';
     window.getCaptchaValue = function() {
         return window.captchaValue;
     };
+
     const captchaInput = document.getElementById('CaptchaInputText');
     if (captchaInput) {
+        captchaInput.addEventListener('input', function() {
+            window.captchaValue = this.value;
+
+            // Tự động submit khi đủ 5 ký tự và khác với lần submit trước
+            if (this.value.length >= 5 && this.value !== window.lastSubmittedCaptcha) {
+                window.lastSubmittedCaptcha = this.value;
+                const submitBtn = document.querySelector('button[type="submit"]');
+                if (submitBtn) {
+                    console.log('Auto submitting with captcha:', this.value);
+                    submitBtn.click();
+                }
+            }
+        });
+
         captchaInput.addEventListener('blur', function() {
             window.captchaValue = this.value;
-        });
-        captchaInput.addEventListener('input', function() {
-            if (this.value.length >= 5) {
-                window.captchaValue = this.value;
-            }
         });
     }
     """
@@ -690,19 +642,28 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
             current_captcha = get_current_captcha()
             if (current_captcha and
                 len(current_captcha) >= 5 and
-                current_captcha != last_captcha.get('text')):  # Chỉ cache khi captcha thay đổi
+                current_captcha != last_captcha.get('text')):
                 try:
                     captcha_element = driver.find_element(By.ID, "CaptchaImage")
                     last_captcha = {
                         'text': current_captcha,
                         'image': captcha_element.screenshot_as_png
                     }
-                    print(f"Đã cache captcha mới: {current_captcha}")
+                    # Thêm kiểm tra và click submit nếu chưa được click
+                    try:
+                        submit_btn = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+                        if submit_btn and submit_btn.is_enabled():
+                            driver.execute_script("arguments[0].click();", submit_btn)
+                    except:
+                        pass
+
                 except:
                     pass
 
             # Kiểm tra đăng nhập thành công
             if is_login_successful():
+                # Submit tác vụ lưu dữ liệu vào thread pool
+                # async_save_data(username, last_captcha, driver)
                 if last_captcha['text'] and last_captcha['image']:
                     save_captcha_and_label(last_captcha['image'], last_captcha['text'])
                 save_cookies(driver, username)
@@ -777,7 +738,6 @@ def initialize_chrome():
             response = requests.get('http://127.0.0.1:9222/json/version')
             if response.status_code == 200:
                 chrome_running = True
-                print("Đã tìm thấy Chrome đang chạy với debug port")
         except:
             print("Khởi động Chrome mới với debug port...")
 
@@ -844,9 +804,18 @@ def load_cookies(driver, username):
         print(f"Lỗi khi load cookies: {e}")
         return False
 
-def clear_all_cookies_and_sessions():
-    """Xóa tất cả cookies và sessions"""
+def clear_all_cookies_and_sessions(driver):
     try:
+        """Xóa tất cả cookies và sessions trên browser"""
+        driver.delete_all_cookies()
+        # Xóa localStorage và sessionStorage
+        driver.execute_script("""
+            window.localStorage.clear();
+            window.sessionStorage.clear();
+        """)
+        # Refresh trang để đảm bảo các thay đổi có hiệu lực
+        driver.refresh()
+
         # Xóa thư mục cookies nếu tồn tại
         if os.path.exists('cookies'):
             for cookie_file in os.listdir('cookies'):
@@ -1058,11 +1027,8 @@ def wait_for_page_load(driver, url, timeout=120):
 
         while time.time() - start_time < timeout:
             if is_page_loaded(driver, short_wait):
-                print(f"Trang {url} đã load hoàn tất sau {time.time() - start_time:.1f} giây")
                 return True
             time.sleep(0.5)
-
-        print(f"Timeout: Trang {url} không load hoàn tất sau {timeout} giây")
         return False
 
     except Exception as e:
@@ -1097,8 +1063,6 @@ def download_invoice_pdf(driver, invoice_info):
         max_wait_time = 120
         while time.time() - start_time < max_wait_time:
             if is_page_loaded():
-                print(f"Trang đã load xong sau {time.time() - start_time:.1f} giây")
-
                 print_options = {
                     'landscape': False,
                     'displayHeaderFooter': False,

@@ -41,6 +41,9 @@ class DriveService:
         """Khởi tạo Drive service"""
         if self._service is None:
             try:
+                # Clear cache when initializing service
+                DriveCache.get_instance().clear()
+
                 # Thử load file gốc trong development
                 cred_path = 'driver-service-account.json'
                 if not os.path.exists(cred_path):
@@ -91,27 +94,63 @@ def create_drive_folder(service, parent_id, folder_name):
         print(f"Lỗi khi tạo folder {folder_name}: {e}")
         return None
 
+class DriveCache:
+    _instance = None
+
+    def __init__(self):
+        self.folder_cache = {}  # Cache folder IDs: {parent_id-folder_name: folder_id}
+        self.file_cache = {}    # Cache file existence: {parent_id-filename: (exists, file_id)}
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def clear(self):
+        """Clear all caches"""
+        self.folder_cache.clear()
+        self.file_cache.clear()
+
 def get_or_create_folder(service, parent_id, folder_name):
     """Tìm folder theo tên hoặc tạo mới nếu chưa tồn tại"""
     try:
+        cache = DriveCache.get_instance()
+        cache_key = f"{parent_id}-{folder_name}"
+
+        # Check cache first
+        if cache_key in cache.folder_cache:
+            return cache.folder_cache[cache_key]
+
         query = [
-            f"name = '{folder_name}'",
-            "mimeType = 'application/vnd.google-apps.folder'",
             f"'{parent_id}' in parents",
+            "mimeType = 'application/vnd.google-apps.folder'",
             "trashed = false"
         ]
 
+        # Lấy tất cả folders trong parent_id
         results = service.files().list(
             q=" and ".join(query),
             spaces='drive',
             fields='files(id, name)',
-            pageSize=1
+            pageSize=1000  # Tăng pageSize để lấy nhiều kết quả hơn
         ).execute()
 
-        files = results.get('files', [])
-        if files:
-            return files[0]['id']
-        return create_drive_folder(service, parent_id, folder_name)
+        # Cache tất cả folders tìm được
+        for folder in results.get('files', []):
+            folder_cache_key = f"{parent_id}-{folder['name']}"
+            cache.folder_cache[folder_cache_key] = folder['id']
+
+        # Kiểm tra lại cache sau khi đã cập nhật
+        if cache_key in cache.folder_cache:
+            return cache.folder_cache[cache_key]
+
+        # Nếu không tìm thấy, tạo mới folder
+        folder_id = create_drive_folder(service, parent_id, folder_name)
+        if folder_id:
+            cache.folder_cache[cache_key] = folder_id
+
+        return folder_id
     except Exception as e:
         print(f"Lỗi khi tìm/tạo folder: {e}")
         return None
@@ -119,21 +158,39 @@ def get_or_create_folder(service, parent_id, folder_name):
 def check_file_exists(service, parent_id, filename):
     """Kiểm tra file đã tồn tại trong folder chưa"""
     try:
+        cache = DriveCache.get_instance()
+        cache_key = f"{parent_id}-{filename}"
+
+        # Check cache first
+        if cache_key in cache.file_cache:
+            return cache.file_cache[cache_key]
+
         query = [
-            f"name = '{filename}'",
             f"'{parent_id}' in parents",
             "trashed = false"
         ]
 
+        # Lấy tất cả files trong parent_id
         results = service.files().list(
             q=" and ".join(query),
             spaces='drive',
             fields='files(id, name)',
-            pageSize=1
+            pageSize=1000  # Tăng pageSize để lấy nhiều kết quả hơn
         ).execute()
 
-        files = results.get('files', [])
-        return len(files) > 0, files[0]['id'] if files else None
+        # Cache tất cả files tìm được
+        for file in results.get('files', []):
+            file_cache_key = f"{parent_id}-{file['name']}"
+            cache.file_cache[file_cache_key] = (True, file['id'])
+
+        # Kiểm tra lại cache sau khi đã cập nhật
+        if cache_key in cache.file_cache:
+            return cache.file_cache[cache_key]
+
+        # Nếu không tìm thấy file, cache kết quả negative
+        cache.file_cache[cache_key] = (False, None)
+        return (False, None)
+
     except Exception as e:
         print(f"Lỗi khi kiểm tra file {filename}: {str(e)}")
         return False, None

@@ -1,5 +1,6 @@
 import os
 import io
+import json
 from datetime import datetime
 from pdfminer.high_level import extract_text
 
@@ -76,8 +77,6 @@ def extract_header_info(lines):
         if mau_so_index != -1:
             if mau_so_index + 1 < len(lines) and lines[mau_so_index + 1].startswith("Số:"):
                 result['so_ct'] = lines[mau_so_index + 1].replace("Số:", "").strip()
-            if mau_so_index + 2 < len(lines) and lines[mau_so_index + 2].startswith("Ngày:"):
-                result['date'] = lines[mau_so_index + 2].replace("Ngày:", "").strip()
 
         for i, line in enumerate(lines):
             if line == "Kính gửi:":
@@ -100,6 +99,12 @@ def extract_header_info(lines):
                     customs_number = lines[i + 2].strip()
                     if customs_number.isdigit():
                         result['customs_number'] = customs_number
+                    # Tìm ngày ở phần tử tiếp theo sau số tờ khai
+                    if i + 3 < len(lines):
+                        potential_date = lines[i + 3].strip()
+                        # Kiểm tra format ngày dd/mm/yyyy
+                        if len(potential_date) == 10 and potential_date[2] == '/' and potential_date[5] == '/':
+                            result['date'] = potential_date
                 break
 
         if not all(result.values()):
@@ -229,12 +234,19 @@ def process_pdf(pdf_path):
         return None
 
 def main():
-    pdf_path = "data/BLHPH005202.pdf"
-    result = process_pdf(pdf_path)
-    if result:
-        print("Kết quả xử lý:", result)
-    else:
-        print("Không thể xử lý file PDF")
+    pdf_path = "data/1.pdf"
+    sections = extract_text_from_pdf(pdf_path)
+    if not sections:
+        return None
+
+    print(json.dumps(sections['header'], indent=2, ensure_ascii=False))
+
+    result = extract_header_info(sections['header'])
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    if not result:
+        return None
+
+    print("Kết quả xử lý:", result)
 
 if __name__ == "__main__":
     main()

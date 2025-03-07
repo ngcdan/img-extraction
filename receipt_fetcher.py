@@ -148,7 +148,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                     # Tính toán range mới dựa trên ngày hiện tại
                     current_min_date = current_date - timedelta(days=7)
-                    current_max_date = current_date + timedelta(days=2)
+                    current_max_date = current_date + timedelta(days=7)
 
                     # Cập nhật min_date và max_date nếu range mới rộng hơn
                     if current_min_date < existing_min_date:
@@ -163,7 +163,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     new_entry = result.copy()
                     # Thêm min_date và max_date nhưng giữ nguyên date gốc
                     new_entry['min_date'] = format_date(current_date - timedelta(days=7))
-                    new_entry['max_date'] = format_date(current_date + timedelta(days=2))
+                    new_entry['max_date'] = format_date(current_date + timedelta(days=7))
                     # date gốc đã được copy từ result
                     grouped_results[tax_number].append(new_entry)
 

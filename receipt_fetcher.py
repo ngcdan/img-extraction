@@ -416,6 +416,14 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                             so_tk_input.clear()
                             so_tk_input.send_keys(invoice_info['customs_number'])
 
+                            # Đợi và điền ngày bắt đầu
+                            tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
+                            tu_ngay_input.clear()
+
+                            # Đợi và điền ngày kết thúc
+                            den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
+                            den_ngay_input.clear()
+
                             # Thực hiện tìm kiếm với retry
                             max_retries = 3
                             retry_count = 0

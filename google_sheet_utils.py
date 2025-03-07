@@ -1,44 +1,39 @@
 import os
 import sys
+from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from tenacity import retry, stop_after_attempt, wait_exponential
+from utils import get_resource_path
 
-def get_resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
 
 # Cấu hình chung
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE_ACCOUNT_FILE = 'service-account-key.json'
 SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
-RANGE_NAME = 'main!A:V'
+HEADER_ROW = [
+    'STT', 'Số chứng từ', 'PartnerID', 'PartnerName', 'JobNo', 'HBLNo', 'Custom No',
+    'FeeCode', 'FeeName', 'Quantity', 'Unit', 'Amount', 'VAT',
+    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate', 'PartnerID_Inv', 'PartnerName_Inv'
+]
 
 class SheetService:
     _instance = None
     _service = None
+    _sheet_cache = {}  # Cache để lưu trữ thông tin về các sheet đã tạo
 
     @classmethod
     def get_instance(cls):
-        """Singleton pattern để đảm bảo chỉ tạo một instance của Sheet service"""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
     def __init__(self):
-        """Khởi tạo Sheet service"""
         if self._service is None:
             try:
-                # Thử load file gốc trong development
                 cred_path = SERVICE_ACCOUNT_FILE
                 if not os.path.exists(cred_path):
-                    # Trong production, load file đã được rename
                     cred_path = get_resource_path('data2.bin')
 
                 if not os.path.exists(cred_path):
@@ -47,89 +42,167 @@ class SheetService:
                 credentials = service_account.Credentials.from_service_account_file(
                     cred_path, scopes=SCOPES)
                 self._service = build('sheets', 'v4', credentials=credentials)
+                self._load_existing_sheets()
             except Exception as e:
                 print(f"Lỗi khởi tạo Sheet service: {str(e)}")
                 raise
 
+    def _load_existing_sheets(self):
+        """Load tất cả sheets hiện có vào cache"""
+        try:
+            spreadsheet = self._service.spreadsheets().get(
+                spreadsheetId=SPREADSHEET_ID
+            ).execute()
+
+            sheets = []
+            for sheet in spreadsheet.get('sheets', []):
+                title = sheet['properties']['title']
+                sheet_id = sheet['properties']['sheetId']
+                try:
+                    # Thử chuyển đổi tên sheet thành datetime
+                    date_obj = datetime.strptime(title, '%d/%m/%Y')
+                    sheets.append((title, sheet_id, date_obj))
+                except ValueError:
+                    # Nếu không phải định dạng ngày, thêm vào đầu danh sách
+                    sheets.insert(0, (title, sheet_id, None))
+
+            # Sắp xếp sheets theo ngày (ngày nhỏ hơn ở bên trái)
+            sorted_sheets = sorted(sheets, key=lambda x: (x[2] is None, x[2] or datetime.min))
+
+            # Cập nhật vị trí của các sheets
+            requests = []
+            for index, (title, sheet_id, _) in enumerate(sorted_sheets):
+                self._sheet_cache[title] = sheet_id
+                requests.append({
+                    'updateSheetProperties': {
+                        'properties': {
+                            'sheetId': sheet_id,
+                            'index': index
+                        },
+                        'fields': 'index'
+                    }
+                })
+
+            if requests:
+                self._service.spreadsheets().batchUpdate(
+                    spreadsheetId=SPREADSHEET_ID,
+                    body={'requests': requests}
+                ).execute()
+
+        except Exception as e:
+            print(f"Lỗi khi load danh sách sheets: {str(e)}")
+
+    def _create_new_sheet(self, sheet_name):
+        """Tạo sheet mới với tên được chỉ định"""
+        try:
+            # Tìm vị trí thích hợp cho sheet mới
+            new_date = datetime.strptime(sheet_name, '%d/%m/%Y')
+            existing_sheets = []
+
+            spreadsheet = self._service.spreadsheets().get(
+                spreadsheetId=SPREADSHEET_ID
+            ).execute()
+
+            for sheet in spreadsheet.get('sheets', []):
+                title = sheet['properties']['title']
+                try:
+                    date_obj = datetime.strptime(title, '%d/%m/%Y')
+                    existing_sheets.append((title, date_obj))
+                except ValueError:
+                    continue
+
+            # Sắp xếp sheets theo ngày
+            existing_sheets.sort(key=lambda x: x[1])
+
+            # Tìm vị trí thích hợp cho sheet mới
+            insert_index = 0
+            for i, (_, date_obj) in enumerate(existing_sheets):
+                if new_date > date_obj:
+                    insert_index = i + 1
+
+            # Tạo sheet mới tại vị trí đã xác định
+            request = {
+                'addSheet': {
+                    'properties': {
+                        'title': sheet_name,
+                        'index': insert_index
+                    }
+                }
+            }
+
+            result = self._service.spreadsheets().batchUpdate(
+                spreadsheetId=SPREADSHEET_ID,
+                body={'requests': [request]}
+            ).execute()
+
+            # Lấy sheet ID mới
+            new_sheet_id = result['replies'][0]['addSheet']['properties']['sheetId']
+
+            # Thêm header
+            range_name = f"'{sheet_name}'!A1:T1"
+            self._service.spreadsheets().values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=range_name,
+                valueInputOption='RAW',
+                body={'values': [HEADER_ROW]}
+            ).execute()
+
+            # Cập nhật cache
+            self._sheet_cache[sheet_name] = new_sheet_id
+            return new_sheet_id
+        except Exception as e:
+            print(f"Lỗi khi tạo sheet mới {sheet_name}: {str(e)}")
+            raise
+
+    def get_or_create_sheet(self, date_str):
+        """Lấy hoặc tạo sheet theo ngày"""
+        try:
+            # Chuyển đổi date_str (dd/mm/yyyy) thành datetime để sắp xếp
+            date_obj = datetime.strptime(date_str, '%d/%m/%Y')
+            sheet_name = date_obj.strftime('%d/%m/%Y')
+
+            if sheet_name not in self._sheet_cache:
+                self._create_new_sheet(sheet_name)
+
+            return sheet_name
+        except Exception as e:
+            print(f"Lỗi khi get/create sheet cho ngày {date_str}: {str(e)}")
+            raise
+
     @property
     def service(self):
-        """Trả về Sheet service instance"""
         return self._service
-
-def prepare_row_data(line_item, extracted_info, current_row):
-    """Chuẩn bị dữ liệu cho một dòng trong sheet"""
-    fixed_data = {
-        'service_code': 'CL015567',
-        'vendor': 'SO GTVT- SO GIAO THONG VAN TAI',
-        'charge_code': 'B_CSHT',
-        'description': 'INFRASTRUCTURE FEES',
-        'unit': 'container'
-    }
-
-    return [
-        current_row,  # STT
-        extracted_info.get('so_ct', ''),  # Số chứng từ
-        fixed_data['service_code'],
-        fixed_data['vendor'],
-        extracted_info.get('jobId', ''),
-        extracted_info.get('hawb', ''),
-        extracted_info.get('customs_number', ''),
-        fixed_data['charge_code'],
-        fixed_data['description'],
-        line_item.get('quantity', ''),
-        fixed_data['unit'],
-        line_item.get('unit_price', ''),
-        '',  # Cột 12 để trống
-        line_item.get('amount', ''),
-        extracted_info.get('tax_number', '') != '0303482440',
-        '', '', '',
-        extracted_info.get('tax_number'),
-        extracted_info.get('partner_invoice_name'),
-        '',  # Cột 20 để trống (Notes)
-        line_item.get('container_no', ''),
-        line_item.get('label', '')
-    ]
 
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry=lambda e: isinstance(e, HttpError) and e.resp.status_code in [500, 503]
 )
-def execute_append(sheet, values):
+def execute_append(sheet, sheet_name, values):
     """Thực hiện append dữ liệu vào sheet với retry logic"""
     body = {'values': values}
+    range_name = f"'{sheet_name}'!A:T"
     return sheet.values().append(
         spreadsheetId=SPREADSHEET_ID,
-        range=RANGE_NAME,
+        range=range_name,
         valueInputOption='USER_ENTERED',
         body=body
     ).execute()
 
 def append_to_google_sheet_new(extracted_info):
-    """
-    Thêm thông tin vào Google Sheet
-    Args:
-        invoice_info: dict chứa thông tin invoice {
-            {
-            "tax_number": "106981952010",
-            "custom_no": "106981952010",
-            "invoice_no": "4658624",
-            "seriesNo": "01BLP0-001",
-            "ngay": "03/03/2025",
-            "total_amount": 54595.0,
-            "drive_link": "5e586ce9-393d-4450-ae6e-c80cdf45184a",
-            "so_ct": "202509401778",
-            "partner_invoice_name": "CONG TY TNHH GG HAI DUONG",
-            "processed_at": "2025-03-06 15:38:11"
-            }
-        }
-    """
-
     try:
         sheet_instance = SheetService.get_instance()
         sheet = sheet_instance.service.spreadsheets()
 
-        """Chuẩn bị dữ liệu cho một dòng trong sheet"""
+        # Lấy ngày từ extracted_info
+        date_str = extracted_info.get('ngay', '')
+        if not date_str:
+            print("Không tìm thấy thông tin ngày")
+            return False
+
+        # Lấy hoặc tạo sheet theo ngày
+        sheet_name = sheet_instance.get_or_create_sheet(date_str)
+
         fixed_data = {
             'service_code': 'CL015567',
             'vendor': 'SO GTVT- SO GIAO THONG VAN TAI',
@@ -138,34 +211,15 @@ def append_to_google_sheet_new(extracted_info):
             'unit': 'container'
         }
 
-        result = {
-            'so_ct': None,
-            'date': None,
-            'tax_number': None,
-            'customs_number': None,
-            'partner_invoice_name': None
-        }
-
-        # Lấy số dòng hiện tại
+        # Lấy số dòng hiện tại của sheet cụ thể
         try:
             result = sheet.values().get(
                 spreadsheetId=SPREADSHEET_ID,
-                range=RANGE_NAME
+                range=f"'{sheet_name}'!A:A"
             ).execute()
             current_row = len(result.get('values', []))
         except HttpError as e:
-            print(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}")
-            return False
-
-        # Lấy số dòng hiện tại
-        try:
-            result = sheet.values().get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=RANGE_NAME
-            ).execute()
-            current_row = len(result.get('values', []))
-        except HttpError as e:
-            print(f"Lỗi khi đọc dữ liệu từ sheet: {str(e)}")
+            print(f"Lỗi khi đọc dữ liệu từ sheet {sheet_name}: {str(e)}")
             return False
 
         values = []
@@ -193,13 +247,12 @@ def append_to_google_sheet_new(extracted_info):
         ]
         values.append(row_data)
 
-        # Thực hiện append với retry
         try:
-            execute_append(sheet, values)
-            print(f"Đã thêm 1 dòng vào Google Sheet")
+            execute_append(sheet, sheet_name, values)
+            print(f"Đã thêm 1 dòng vào sheet {sheet_name}")
             return True
         except Exception as e:
-            print(f"Lỗi sau 3 lần thử append dữ liệu: {str(e)}")
+            print(f"Lỗi sau 3 lần thử append dữ liệu vào sheet {sheet_name}: {str(e)}")
             return False
 
     except Exception as e:

@@ -116,6 +116,28 @@ def get_or_create_folder(service, parent_id, folder_name):
         print(f"Lỗi khi tìm/tạo folder: {e}")
         return None
 
+def check_file_exists(service, parent_id, filename):
+    """Kiểm tra file đã tồn tại trong folder chưa"""
+    try:
+        query = [
+            f"name = '{filename}'",
+            f"'{parent_id}' in parents",
+            "trashed = false"
+        ]
+
+        results = service.files().list(
+            q=" and ".join(query),
+            spaces='drive',
+            fields='files(id, name)',
+            pageSize=1
+        ).execute()
+
+        files = results.get('files', [])
+        return len(files) > 0, files[0]['id'] if files else None
+    except Exception as e:
+        print(f"Lỗi khi kiểm tra file {filename}: {str(e)}")
+        return False, None
+
 def upload_file_to_drive(file_content, filename, parent_folder_date, mimetype='application/pdf', folder_type='CUSTOMS'):
     """
     Upload file lên Google Drive với cấu trúc thư mục ngày

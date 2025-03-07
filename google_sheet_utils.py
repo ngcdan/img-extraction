@@ -59,7 +59,7 @@ class SheetService:
 def prepare_row_data(line_item, extracted_info, current_row):
     """Chuẩn bị dữ liệu cho một dòng trong sheet"""
     fixed_data = {
-        'service_code': 'CL014920',
+        'service_code': 'CL015567',
         'vendor': 'SO GTVT- SO GIAO THONG VAN TAI',
         'charge_code': 'B_CSHT',
         'description': 'INFRASTRUCTURE FEES',
@@ -131,7 +131,7 @@ def append_to_google_sheet_new(extracted_info):
 
         """Chuẩn bị dữ liệu cho một dòng trong sheet"""
         fixed_data = {
-            'service_code': 'CL014920',
+            'service_code': 'CL015567',
             'vendor': 'SO GTVT- SO GIAO THONG VAN TAI',
             'charge_code': 'B_CSHT',
             'description': 'INFRASTRUCTURE FEES',

@@ -170,8 +170,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         # 3. Thực hiện download và write dữ liệu
         try:
             for tax_number, customs_numbers in grouped_results.items():
-                print(json.dumps(customs_numbers, indent=2, ensure_ascii=False))
-                print("\n\n - - - - - - - - - - - - \n")
                 try:
                     session = requests.Session()
                     session.verify = False
@@ -304,7 +302,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                 search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
                                 driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
                                 driver.execute_script("arguments[0].click();", search_button)
-                                print("Đã click nút tìm kiếm")
 
                                 def is_search_complete():
                                     try:
@@ -393,7 +390,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                         except Exception as e:
                             print(f"Lỗi khi xử lý row: {str(e)}")
-                            print(f"Chi tiết row: {row.text}")
                             continue
 
                     if len(matched_results) != len(customs_numbers):
@@ -405,11 +401,8 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                             if str(customs['customs_number']) not in matched_customs_numbers
                         ]
 
-                        print("\nCác tờ khai chưa được khớp:")
                         for invoice_info in unmatched_customs:
                             print(f"- Số tờ khai: {invoice_info['customs_number']}")
-                            print(f"  Ngày: {invoice_info.get('date', 'N/A')}")
-                            print(f"  MST: {invoice_info.get('tax_number', 'N/A')}")
                             print("  ---")
                             # Điền số tờ khai và tìm kiếm
                             so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
@@ -433,7 +426,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                     search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
                                     driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
                                     driver.execute_script("arguments[0].click();", search_button)
-                                    print("Đã click nút tìm kiếm")
 
                                     def is_search_complete():
                                         try:
@@ -518,7 +510,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                     'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                 }
                                 matched_results.append(result)
-                                print(f"Đã tìm thấy và xử lý tờ khai {customs['customs_number']}")
                             else:
                                 print(f"Kết quả tìm kiếm không khớp. Tìm: {customs['customs_number']}, Tìm thấy: {found_custom_no}")
                                 continue
@@ -608,8 +599,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                                 filename=f"CSHT_{invoice_no}.pdf",
                                 parent_folder_date=ngay_formatted
                             )
-
-                            print(json.dumps(invoice_info, indent=2, ensure_ascii=False))
 
                             customs_no = invoice_info.get('custom_no')
                             if customs_no and customs_no in cached_extracted_files:
@@ -738,13 +727,11 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
             username_input = wait.until(EC.presence_of_element_located((By.ID, "form-username")))
             username_input.clear()
             username_input.send_keys(username)
-            print("Đã điền username")
 
             # Đợi và điền password
             password_input = wait.until(EC.presence_of_element_located((By.ID, "form-password")))
             password_input.clear()
             password_input.send_keys(password)
-            print("Đã điền password")
 
             # Đảm bảo focus vào ô captcha
             try:
@@ -783,7 +770,6 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
 
     # Đảm bảo đang ở trang đăng nhập
     if driver.current_url != login_url:
-        print(f"Chuyển hướng tới trang đăng nhập từ: {driver.current_url}")
         driver.get(login_url)
         time.sleep(1)
 
@@ -811,9 +797,7 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
 
             # Kiểm tra đăng nhập thành công
             if is_login_successful():
-                print("Đăng nhập thành công!")
                 if last_captcha['text'] and last_captcha['image']:
-                    print(f"Lưu captcha cuối cùng: {last_captcha['text']}")
                     save_captcha_and_label(last_captcha['image'], last_captcha['text'])
                 save_cookies(driver, username)
                 return True
@@ -826,15 +810,12 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
                 # Kiểm tra thông báo lỗi
                 error_messages = driver.find_elements(By.CLASS_NAME, "validation-summary-errors")
                 if error_messages and any(msg.is_displayed() for msg in error_messages):
-                    print(f"Phát hiện lỗi đăng nhập: {error_messages[0].text}")
                     # Điền lại thông tin nếu form trống
                     if needs_refill():
-                        print("Điền lại thông tin đăng nhập...")
                         fill_form()
 
                 # Kiểm tra và điền lại nếu form trống
                 elif needs_refill():
-                    print("Form trống, điền lại thông tin...")
                     fill_form()
 
             time.sleep(0.5)  # Giảm tải CPU
@@ -857,7 +838,6 @@ def save_captcha_and_label(image_data, captcha_text):
         result = upload_captcha_to_drive(image_data)
 
         if result['success']:
-            print(f"Đã lưu captcha {result['filename']} với label: {captcha_text}")
             append_result = append_to_labels_file(result['filename'], captcha_text)
             return append_result['success']
         return False

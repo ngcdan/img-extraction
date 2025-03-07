@@ -650,6 +650,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
                     # Redirect về trang login sau khi xử lý xong tax_number
                     try:
+                        clear_all_cookies_and_sessions()
                         driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
                         time.sleep(1)  # Đợi 1 giây để đảm bảo redirect hoàn tất
                     except Exception as e:
@@ -943,6 +944,22 @@ def load_cookies(driver, username):
         return True
     except Exception as e:
         print(f"Lỗi khi load cookies: {e}")
+        return False
+
+def clear_all_cookies_and_sessions():
+    """Xóa tất cả cookies và sessions"""
+    try:
+        # Xóa thư mục cookies nếu tồn tại
+        if os.path.exists('cookies'):
+            for cookie_file in os.listdir('cookies'):
+                try:
+                    os.remove(os.path.join('cookies', cookie_file))
+                except Exception as e:
+                    print(f"Lỗi khi xóa file cookie {cookie_file}: {str(e)}")
+            os.rmdir('cookies')
+        return True
+    except Exception as e:
+        print(f"Lỗi khi xóa cookies và sessions: {str(e)}")
         return False
 
 

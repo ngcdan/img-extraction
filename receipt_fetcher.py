@@ -189,9 +189,15 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             session.verify = False
             success_count = 0
 
-            # Mở tab mới và login
-            driver.execute_script("window.open('about:blank', '_blank');")
-            driver.switch_to.window(driver.window_handles[-1])
+            # Kiểm tra URL hiện tại
+            current_url = driver.current_url
+            is_login_page = "dang-nhap" in current_url
+            is_blank_page = current_url in ["about:blank", "chrome://newtab/"]
+
+            # Chỉ mở tab mới nếu không phải trang login hoặc trang trống
+            if not (is_login_page or is_blank_page):
+                driver.execute_script("window.open('about:blank', '_blank');")
+                driver.switch_to.window(driver.window_handles[-1])
 
             # Khởi tạo WebDriverWait với timeout dài hơn
             long_wait = WebDriverWait(driver, 120)  # 2 phút

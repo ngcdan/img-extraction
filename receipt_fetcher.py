@@ -146,19 +146,25 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     existing_min_date = parse_date(existing_customs['min_date'])
                     existing_max_date = parse_date(existing_customs['max_date'])
 
-                    # Cập nhật min_date và max_date
-                    if current_date < existing_min_date:
-                        existing_customs['min_date'] = format_date(current_date)
-                    if current_date > existing_max_date:
-                        # Tăng max_date thêm 2 ngày
-                        next_day = current_date + timedelta(days=2)
-                        existing_customs['max_date'] = format_date(next_day)
+                    # Tính toán range mới dựa trên ngày hiện tại
+                    current_min_date = current_date - timedelta(days=7)
+                    current_max_date = current_date + timedelta(days=2)
+
+                    # Cập nhật min_date và max_date nếu range mới rộng hơn
+                    if current_min_date < existing_min_date:
+                        existing_customs['min_date'] = format_date(current_min_date)
+                    if current_max_date > existing_max_date:
+                        existing_customs['max_date'] = format_date(current_max_date)
+
+                    # Đảm bảo giữ nguyên ngày gốc
+                    existing_customs['date'] = result['date']
                 else:
                     # Copy tất cả các field từ result gốc
                     new_entry = result.copy()
-                    # Thêm min_date và max_date (max_date + 2 days)
-                    new_entry['min_date'] = format_date(current_date)
+                    # Thêm min_date và max_date nhưng giữ nguyên date gốc
+                    new_entry['min_date'] = format_date(current_date - timedelta(days=7))
                     new_entry['max_date'] = format_date(current_date + timedelta(days=2))
+                    # date gốc đã được copy từ result
                     grouped_results[tax_number].append(new_entry)
 
         # 3. Thực hiện download và write dữ liệu
@@ -294,9 +300,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                         retry_count = 0
                         while retry_count < max_retries:
                             try:
-                                # Lưu trạng thái bảng hiện tại để so sánh
-                                current_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
-
                                 # Click nút tìm kiếm
                                 search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
                                 driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
@@ -394,13 +397,131 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                             continue
 
                     if len(matched_results) != len(customs_numbers):
-                        print("\nDanh sách thông tin tờ khai đã khớp:")
-                        print(json.dumps(matched_results, indent=2, ensure_ascii=False))
 
-                        print("\nDanh sách thông tin tờ khai cần xử lý:")
-                        print(json.dumps(customs_numbers, indent=2, ensure_ascii=False))
+                        # Lọc ra các tờ khai chưa được khớp
+                        matched_customs_numbers = {str(result['custom_no']) for result in matched_results}
+                        unmatched_customs = [
+                            customs for customs in customs_numbers
+                            if str(customs['customs_number']) not in matched_customs_numbers
+                        ]
 
-                        raise Exception("Số lượng biên lai khớp không bằng số lượng tờ khai cần xử lý")
+                        print("\nCác tờ khai chưa được khớp:")
+                        for invoice_info in unmatched_customs:
+                            print(f"- Số tờ khai: {invoice_info['customs_number']}")
+                            print(f"  Ngày: {invoice_info.get('date', 'N/A')}")
+                            print(f"  MST: {invoice_info.get('tax_number', 'N/A')}")
+                            print("  ---")
+                            # Điền số tờ khai và tìm kiếm
+                            so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
+                            so_tk_input.clear()
+                            so_tk_input.send_keys(invoice_info['customs_number'])
+
+                            # Thực hiện tìm kiếm với retry
+                            max_retries = 3
+                            retry_count = 0
+                            while retry_count < max_retries:
+                                try:
+                                    # Click nút tìm kiếm
+                                    search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
+                                    driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
+                                    driver.execute_script("arguments[0].click();", search_button)
+                                    print("Đã click nút tìm kiếm")
+
+                                    def is_search_complete():
+                                        try:
+                                            # Kiểm tra preloader đã biến mất
+                                            if driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                                                return False
+
+                                            # Kiểm tra bảng đã xuất hiện
+                                            table = driver.find_element(By.ID, "TBLDANHSACH")
+                                            if not table:
+                                                return False
+
+                                            # Kiểm tra có dữ liệu mới hoặc thông báo không có dữ liệu
+                                            new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
+                                            has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
+
+                                            if new_rows > 0 or has_no_data:
+                                                return True
+                                            return False
+
+                                        except Exception:
+                                            return False
+
+                                    # Đợi với timeout 30 giây nhưng phản ứng nhanh khi có kết quả
+                                    start_time = time.time()
+                                    search_completed = False
+                                    while time.time() - start_time < 30:
+                                        if is_search_complete():
+                                            print(f"Tìm kiếm hoàn tất sau {time.time() - start_time:.1f} giây")
+                                            search_completed = True
+                                            break
+                                        time.sleep(0.1)  # Check mỗi 100ms
+
+                                    if search_completed:
+                                        break  # Thoát khỏi vòng lặp retry
+                                    else:
+                                        raise TimeoutException("Timeout chờ kết quả tìm kiếm")
+
+                                except Exception as e:
+                                    retry_count += 1
+                                    print(f"Lần thử {retry_count}: {str(e)}")
+                                    if retry_count == max_retries:
+                                        raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
+                                    time.sleep(1)
+                            # Tìm bảng và trích xuất số tờ khai
+                            table = driver.find_element(By.ID, "TBLDANHSACH")
+                            rows = table.find_elements(By.TAG_NAME, "tr")
+
+                            if len(rows) <= 1:  # Chỉ có header
+                                print(f"Không tìm thấy dữ liệu cho số tờ khai {customs['customs_number']}")
+                                continue
+
+                            # Lấy row đầu tiên sau header
+                            first_row = rows[1]
+                            cells = first_row.find_elements(By.TAG_NAME, "td")
+
+                            # Kiểm tra xem có phải là row "No data available"
+                            if len(cells) == 1 and "No data available" in cells[0].text:
+                                print(f"Không tìm thấy dữ liệu cho số tờ khai {customs['customs_number']}")
+                                continue
+
+                            # Lấy custom_no từ row đầu tiên
+                            found_custom_no = str(cells[4].text.strip())
+
+                            # Kiểm tra xem có khớp với số tờ khai đang tìm không
+                            if found_custom_no == str(customs['customs_number']):
+                                link_cell = cells[1]
+                                link_element = link_cell.find_element(By.TAG_NAME, "a")
+                                href = link_element.get_attribute("href")
+                                mhd = href.split("mhd=")[-1] if "mhd=" in href else ""
+
+                                result = {
+                                    'custom_no': found_custom_no,
+                                    'invoice_no': cells[8].text.strip() if len(cells) > 8 else '',
+                                    'seriesNo': cells[7].text.strip() if len(cells) > 7 else '',
+                                    'ngay': cells[9].text.strip() if len(cells) > 9 else '',
+                                    'total_amount': convert_price_to_number(cells[11].text.strip()) if len(cells) > 11 else 0,
+                                    'drive_link': mhd,
+                                    'tax_number': customs.get('tax_number'),
+                                    'so_ct': customs.get('so_ct', ''),
+                                    'partner_invoice_name': customs.get('partner_invoice_name', ''),
+                                    'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                }
+                                matched_results.append(result)
+                                print(f"Đã tìm thấy và xử lý tờ khai {customs['customs_number']}")
+                            else:
+                                print(f"Kết quả tìm kiếm không khớp. Tìm: {customs['customs_number']}, Tìm thấy: {found_custom_no}")
+                                continue
+
+                        if len(matched_results) != len(customs_numbers):
+                            print("\nDanh sách thông tin tờ khai đã khớp:")
+                            print(json.dumps(matched_results, indent=2, ensure_ascii=False))
+
+                            print("\nDanh sách thông tin tờ khai cần xử lý:")
+                            print(json.dumps(customs_numbers, indent=2, ensure_ascii=False))
+                            raise Exception(f"Số lượng biên lai khớp không bằng số lượng tờ khai cần xử lý. Còn {len(unmatched_customs)} tờ khai chưa khớp.")
 
                     # Xử lý từng tài liệu một
                     success_count = 0
@@ -667,13 +788,16 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
         try:
             # Cập nhật captcha cuối cùng
             current_captcha = get_current_captcha()
-            if current_captcha and len(current_captcha) >= 5:
+            if (current_captcha and
+                len(current_captcha) >= 5 and
+                current_captcha != last_captcha.get('text')):  # Chỉ cache khi captcha thay đổi
                 try:
                     captcha_element = driver.find_element(By.ID, "CaptchaImage")
                     last_captcha = {
                         'text': current_captcha,
                         'image': captcha_element.screenshot_as_png
                     }
+                    print(f"Đã cache captcha mới: {current_captcha}")
                 except:
                     pass
 
@@ -719,59 +843,7 @@ def fill_login_info(driver, username, password, max_wait_time=120):  # 2 phút t
 
     raise Exception(f"Hết thời gian chờ ({max_wait_time}s) - Người dùng chưa đăng nhập thành công")
 
-def collect_captcha_if_login(driver):
-    """Thu thập captcha nếu cần đăng nhập"""
-    try:
-        # Thêm script theo dõi captcha
-        js_script = """
-        window.captchaValue = '';
-        window.getCaptchaValue = function() {
-            return window.captchaValue;
-        };
-        const captchaInput = document.getElementById('CaptchaInputText');
-        if (captchaInput) {
-            captchaInput.addEventListener('blur', function() {
-                window.captchaValue = this.value;
-            });
-            captchaInput.addEventListener('input', function() {
-                if (this.value.length >= 5) {
-                    window.captchaValue = this.value;
-                }
-            });
-        }
-        """
-        driver.execute_script(js_script)
-
-        # Đợi đăng nhập thành công và lưu captcha
-        current_url = driver.current_url
-        timeout = time.time() + 60  # timeout 60 giây
-        captcha_saved = False
-        login_success = False
-
-        while time.time() < timeout:
-            try:
-                if not captcha_saved:
-                    captcha_text = driver.execute_script("return window.getCaptchaValue()")
-                    if captcha_text and len(captcha_text) >= 5:
-                        save_captcha_and_label(driver, captcha_text)
-                        captcha_saved = True
-
-                if current_url != driver.current_url:
-                    if driver.current_url == "http://thuphi.haiphong.gov.vn:8222/Home":
-                        login_success = True
-                        break
-            except Exception:
-                continue
-            time.sleep(0.5)
-
-        return login_success
-    except Exception as e:
-        print(f"Lỗi khi thu thập captcha: {e}")
-        return False
-
-
 def save_captcha_and_label(image_data, captcha_text):
-    """Lưu ảnh captcha và nhãn"""
     try:
         from google_drive_utils import upload_captcha_to_drive, append_to_labels_file
         result = upload_captcha_to_drive(image_data)

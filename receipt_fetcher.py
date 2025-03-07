@@ -648,6 +648,13 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                         'success_count': success_count
                     })
 
+                    # Redirect về trang login sau khi xử lý xong tax_number
+                    try:
+                        driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
+                        time.sleep(1)  # Đợi 1 giây để đảm bảo redirect hoàn tất
+                    except Exception as e:
+                        print(f"Lỗi khi redirect về trang login: {str(e)}")
+
                 except Exception as e:
                     print(f"Lỗi khi xử lý MST {tax_number}: {str(e)}")
                     download_results.append({

@@ -4,6 +4,7 @@ from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 import io
 import os
 import sys
+import platform
 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -14,6 +15,8 @@ def get_resource_path(relative_path):
         base_path = os.path.abspath(".")
 
     return os.path.join(base_path, relative_path)
+
+
 
 # Cấu hình chung
 SCOPES = ['https://www.googleapis.com/auth/drive.file']

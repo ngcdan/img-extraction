@@ -16,6 +16,7 @@ import os
 import base64
 import json
 import asyncio
+import shutil
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -36,6 +37,8 @@ from extract_info import (
     extract_header_info,
     convert_price_to_number
 )
+
+from utils import get_default_customs_dir
 
 def parse_date(date_str):
     """Chuyển đổi chuỗi ngày dạng 'dd/mm/yyyy' thành đối tượng datetime"""
@@ -1095,16 +1098,7 @@ def download_invoice_pdf(driver, invoice_info):
 
 def process_and_upload_invoice(invoice_info, pdf_data, cached_extracted_files, drive_upload_results):
     """
-    Upload PDF lên drive và append vào sheet
-
-    Args:
-        invoice_info: Dict chứa thông tin biên lai
-        pdf_data: Bytes của file PDF
-        cached_extracted_files: Dict chứa các file đã extract
-        drive_upload_results: List để track kết quả upload
-
-    Returns:
-        bool: True nếu thành công, False nếu thất bại
+    Upload PDF lên drive và append vào sheet, sau đó di chuyển file đã xử lý vào thư mục success
     """
     try:
         ngay_formatted = invoice_info['ngay'].replace('/', '') if invoice_info.get('ngay') else datetime.now().strftime('%d%m%Y')
@@ -1153,6 +1147,27 @@ def process_and_upload_invoice(invoice_info, pdf_data, cached_extracted_files, d
                         'status': 'success',
                         'path': customs_upload_result['file_path']
                     })
+
+                    # Move file to customs_success folder after successful upload
+                    source_file = cached_data['header_info']['source_file']
+                    source_path = os.path.join(get_default_customs_dir(), source_file)
+                    success_dir = os.path.join(get_default_customs_dir(), 'customs_success')
+
+                    # Create customs_success directory if it doesn't exist
+                    if not os.path.exists(success_dir):
+                        os.makedirs(success_dir)
+
+                    target_path = os.path.join(success_dir, source_file)
+
+                    try:
+                        # If file already exists in success folder, replace it
+                        if os.path.exists(target_path):
+                            os.remove(target_path)
+                        shutil.move(source_path, target_path)
+                        print(f"Đã di chuyển file {source_file} vào thư mục customs_success")
+                    except Exception as move_error:
+                        print(f"Lỗi khi di chuyển file {source_file}: {str(move_error)}")
+
                 else:
                     drive_upload_results.append({
                         'file': cached_data['header_info']['source_file'],

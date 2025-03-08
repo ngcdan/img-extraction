@@ -45,6 +45,8 @@ from pdf_invoice_parser import (
 )
 
 from utils import get_default_customs_dir, parse_date, format_date
+from cookie_manager import CookieManager
+from chrome_manager import ChromeManager
 
 def extract_files_info(files: List[str]) -> Tuple[List[Dict], Dict]:
     """
@@ -166,7 +168,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
     """
     driver = None
     try:
-        driver = initialize_chrome()
+        driver = ChromeManager.initialize_chrome()
         if not driver:
             raise Exception("Không thể khởi tạo Chrome driver")
 
@@ -196,7 +198,8 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     continue
 
                 # Truy cập trang tìm kiếm
-                driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
+                if not ChromeManager.wait_for_page_load(driver, "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu"):
+                    raise Exception("Không thể truy cập trang tìm kiếm")
 
                 # Tăng thời gian chờ tối đa lên 60 giây
                 wait = WebDriverWait(driver, 60)
@@ -210,11 +213,11 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                 start_time = time.time()
                 while time.time() - start_time < 60:  # Tối đa 60 giây
                     if not driver.find_elements(By.CLASS_NAME, "preloader-container"):
-                        if is_table_loaded_with_data(driver, short_wait):
+                        if ChromeManager.is_table_loaded_with_data(driver, short_wait):
                             break
                     time.sleep(0.5)  # Đợi 500ms trước khi check lại
 
-                if not is_table_loaded_with_data(driver, short_wait):
+                if not ChromeManager.is_table_loaded_with_data(driver, short_wait):
                     print(f"MST {tax_number}: Không thể load dữ liệu bảng sau 60 giây - bỏ qua")
                     download_results.append({
                         'tax_number': tax_number,
@@ -508,7 +511,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
             # Redirect về trang login sau khi xử lý xong tax_number
             try:
-                clear_all_cookies_and_sessions(driver)
+                CookieManager.clear_all_cookies_and_sessions(driver)
                 driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
             except Exception as e:
                 print(f"Lỗi khi redirect về trang login: {str(e)}")
@@ -548,548 +551,18 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             except:
                 pass
 
-def fill_login_info(driver, username, password, max_wait_time=240):  # 4 phút timeout
-    """Điền thông tin đăng nhập và đợi user login thành công"""
-    wait = WebDriverWait(driver, 10)
-    login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
-    home_url = "http://thuphi.haiphong.gov.vn:8222/Home"
-    start_time = time.time()
-    last_captcha = {'text': None, 'image': None}
-
-    def is_login_successful():
-        """Kiểm tra đăng nhập thành công"""
-        return (driver.current_url == home_url or
-                (driver.current_url != login_url and "dang-nhap" not in driver.current_url))
-
-    def needs_refill():
-        """Kiểm tra xem có cần điền lại thông tin không"""
-        try:
-            username_input = driver.find_element(By.ID, "form-username")
-            return not username_input.get_attribute('value')
-        except:
-            return False
-
-    def get_current_captcha():
-        """Lấy giá trị captcha hiện tại"""
-        try:
-            captcha_input = driver.find_element(By.ID, "CaptchaInputText")
-            return captcha_input.get_attribute('value')
-        except:
-            return None
-
-    def fill_form():
-        """Điền thông tin form"""
-        try:
-            # Đợi và điền username
-            username_input = wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-            username_input.clear()
-            username_input.send_keys(username)
-
-            # Đợi và điền password
-            password_input = wait.until(EC.presence_of_element_located((By.ID, "form-password")))
-            password_input.clear()
-            password_input.send_keys(password)
-
-            # Đảm bảo focus vào ô captcha
-            try:
-                captcha_input = driver.find_element(By.ID, "CaptchaInputText")
-                captcha_input.click()
-            except:
-                pass
-
-            return True
-        except Exception as e:
-            print(f"Lỗi khi điền form: {str(e)}")
-            return False
-
-    # Thêm script theo dõi captcha để tự động submit
-    js_script = """
-    window.captchaValue = '';
-    window.lastSubmittedCaptcha = '';
-    window.getCaptchaValue = function() {
-        return window.captchaValue;
-    };
-
-    const captchaInput = document.getElementById('CaptchaInputText');
-    if (captchaInput) {
-        captchaInput.addEventListener('input', function() {
-            window.captchaValue = this.value;
-
-            // Tự động submit khi đủ 5 ký tự và khác với lần submit trước
-            if (this.value.length >= 5 && this.value !== window.lastSubmittedCaptcha) {
-                window.lastSubmittedCaptcha = this.value;
-                const submitBtn = document.querySelector('button[type="submit"]');
-                if (submitBtn) {
-                    console.log('Auto submitting with captcha:', this.value);
-                    submitBtn.click();
-                }
-            }
-        });
-
-        captchaInput.addEventListener('blur', function() {
-            window.captchaValue = this.value;
-        });
-    }
-    """
-    try:
-        driver.execute_script(js_script)
-    except:
-        print("Không thể thêm script theo dõi captcha")
-
-    # Đảm bảo đang ở trang đăng nhập
-    if driver.current_url != login_url:
-        driver.get(login_url)
-        time.sleep(1)
-
-    # Điền thông tin lần đầu
-    if not fill_form():
-        raise Exception("Không thể điền thông tin đăng nhập lần đầu")
-
-    # Loop kiểm tra liên tục
-    while time.time() - start_time < max_wait_time:
-        try:
-            # Cập nhật captcha cuối cùng
-            current_captcha = get_current_captcha()
-            if (current_captcha and
-                len(current_captcha) >= 5 and
-                current_captcha != last_captcha.get('text')):
-                try:
-                    captcha_element = driver.find_element(By.ID, "CaptchaImage")
-                    last_captcha = {
-                        'text': current_captcha,
-                        'image': captcha_element.screenshot_as_png
-                    }
-                    # Thêm kiểm tra và click submit nếu chưa được click
-                    try:
-                        submit_btn = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-                        if submit_btn and submit_btn.is_enabled():
-                            driver.execute_script("arguments[0].click();", submit_btn)
-                    except:
-                        pass
-
-                except:
-                    pass
-
-            # Kiểm tra đăng nhập thành công
-            if is_login_successful():
-                # Submit tác vụ lưu dữ liệu vào thread pool
-                # async_save_data(username, last_captcha, driver)
-                if last_captcha['text'] and last_captcha['image']:
-                    save_captcha_and_label(last_captcha['image'], last_captcha['text'])
-                save_cookies(driver, username)
-                return True
-
-            # Kiểm tra URL hiện tại
-            current_url = driver.current_url
-
-            # Nếu đang ở trang login
-            if "dang-nhap" in current_url:
-                # Kiểm tra thông báo lỗi
-                error_messages = driver.find_elements(By.CLASS_NAME, "validation-summary-errors")
-                if error_messages and any(msg.is_displayed() for msg in error_messages):
-                    # Điền lại thông tin nếu form trống
-                    if needs_refill():
-                        fill_form()
-
-                # Kiểm tra và điền lại nếu form trống
-                elif needs_refill():
-                    fill_form()
-
-            time.sleep(0.5)  # Giảm tải CPU
-
-        except Exception as e:
-            print(f"Lỗi khi kiểm tra trạng thái: {str(e)}")
-            # Nếu có lỗi, thử refresh trang và điền lại
-            try:
-                driver.get(login_url)
-                time.sleep(1)
-                fill_form()
-            except:
-                pass
-
-    raise Exception(f"Hết thời gian chờ ({max_wait_time}s) - Người dùng chưa đăng nhập thành công")
-
-def save_captcha_and_label(image_data, captcha_text):
-    try:
-        from google_drive_utils import upload_captcha_to_drive, append_to_labels_file
-        result = upload_captcha_to_drive(image_data)
-
-        if result['success']:
-            append_result = append_to_labels_file(result['filename'], captcha_text)
-            return append_result['success']
-        return False
-
-    except Exception as e:
-        print(f"Lỗi khi lưu captcha và label: {e}")
-        return False
-
-def initialize_chrome(max_retries=3):
-    """Khởi tạo Chrome và mở trang web"""
-    for attempt in range(max_retries):
-        try:
-            print(f"Đang khởi tạo Chrome driver... (lần thử {attempt + 1}/{max_retries})")
-
-            # Xác định đường dẫn profile mặc định của Chrome
-            if platform.system() == 'Windows':
-                default_profile = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
-            else:  # macOS
-                default_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
-
-            # Xác định đường dẫn Chrome
-            if platform.system() == 'Windows':
-                chrome_path = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-                if not os.path.exists(chrome_path):
-                    chrome_path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
-            else:  # macOS
-                chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-
-            # Kill tất cả các process Chrome debug hiện tại
-            if platform.system() == 'Windows':
-                os.system('taskkill /f /im "chrome.exe" >nul 2>&1')
-            else:
-                os.system('pkill -f "Chrome.*--remote-debugging-port=9222" >/dev/null 2>&1')
-
-            time.sleep(2)  # Đợi process được kill hoàn toàn
-
-            # Khởi động Chrome mới
-            chrome_options = Options()
-            chrome_options.add_argument(f'--user-data-dir={default_profile}')
-            chrome_options.add_argument('--remote-debugging-port=9222')
-            chrome_options.add_argument('--no-first-run')
-            chrome_options.add_argument('--no-default-browser-check')
-            chrome_options.add_argument('--start-maximized')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--no-sandbox')
-
-            # Thêm một số options để tăng độ ổn định
-            chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-popup-blocking')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-
-            service = Service(ChromeDriverManager().install())
-
-            try:
-                driver = webdriver.Chrome(service=service, options=chrome_options)
-                print("Đã kết nối với Chrome thành công")
-                return driver
-            except Exception as e:
-                print(f"Lỗi khi kết nối với Chrome (lần {attempt + 1}): {str(e)}")
-                if attempt == max_retries - 1:  # Nếu là lần thử cuối
-                    print("Đã hết số lần thử kết nối với Chrome")
-                    return None
-                time.sleep(3)  # Đợi trước khi thử lại
-                continue
-
-        except Exception as e:
-            print(f"Lỗi khi khởi tạo Chrome (lần {attempt + 1}): {str(e)}")
-            if attempt == max_retries - 1:  # Nếu là lần thử cuối
-                print("Đã hết số lần thử khởi tạo Chrome")
-                return None
-            time.sleep(3)  # Đợi trước khi thử lại
-            continue
-
-    return None
-
-def save_cookies(driver, username):
-    """Lưu cookies cho username"""
-    try:
-        cookies = driver.get_cookies()
-        if not os.path.exists('cookies'):
-            os.makedirs('cookies')
-        with open(f'cookies/{username}.cookies', 'w') as f:
-            json.dump(cookies, f)
-        return True
-    except Exception as e:
-        print(f"Lỗi khi lưu cookies: {e}")
-        return False
-
-def load_cookies(driver, username):
-    """Load cookies cho username"""
-    try:
-        if not os.path.exists(f'cookies/{username}.cookies') or not os.path.exists('cookies'):
-            return False
-        with open(f'cookies/{username}.cookies', 'r') as f:
-            cookies = json.load(f)
-        # Truy cập trang trước khi add cookies
-        driver.get("http://thuphi.haiphong.gov.vn:8222")
-        for cookie in cookies:
-            driver.add_cookie(cookie)
-        return True
-    except Exception as e:
-        print(f"Lỗi khi load cookies: {e}")
-        return False
-
-def clear_all_cookies_and_sessions(driver):
-    try:
-        """Xóa cookies và sessions của domain thuphi.haiphong.gov.vn"""
-        target_domain = "thuphi.haiphong.gov.vn"
-
-        # Lấy tất cả cookies hiện tại
-        all_cookies = driver.get_cookies()
-
-        # Chỉ xóa cookies của domain cần thiết
-        for cookie in all_cookies:
-            if target_domain in cookie.get('domain', ''):
-                driver.delete_cookie(cookie['name'])
-
-        # Xóa localStorage và sessionStorage chỉ khi đang ở domain cần thiết
-        current_url = driver.current_url
-        if target_domain in current_url:
-            driver.execute_script("""
-                window.localStorage.clear();
-                window.sessionStorage.clear();
-            """)
-            # Refresh trang để đảm bảo các thay đổi có hiệu lực
-            driver.refresh()
-
-        # Xóa file cookie cụ thể trong thư mục cookies
-        # if os.path.exists('cookies'):
-        #     target_cookie_file = None
-        #     for cookie_file in os.listdir('cookies'):
-        #         if target_domain in cookie_file:
-        #             try:
-        #                 os.remove(os.path.join('cookies', cookie_file))
-        #                 print(f"Đã xóa file cookie: {cookie_file}")
-        #             except Exception as e:
-        #                 print(f"Lỗi khi xóa file cookie {cookie_file}: {str(e)}")
-        return True
-    except Exception as e:
-        print(f"Lỗi khi xóa cookies và sessions: {str(e)}")
-        return False
-
-def is_table_loaded_with_data(driver, short_wait):
-    """
-    Kiểm tra xem bảng dữ liệu đã load hoàn tất và có dữ liệu chưa
-
-    Args:
-        driver: WebDriver instance
-        short_wait: WebDriverWait instance với timeout ngắn
-
-    Returns:
-        bool: True nếu bảng đã load hoàn tất và có dữ liệu/thông báo empty
-    """
-    try:
-        # 1. Kiểm tra sự tồn tại của bảng
-        table = short_wait.until(EC.presence_of_element_located((By.ID, "TBLDANHSACH")))
-        if not table:
-            return False
-
-        # 2. Kiểm tra xem bảng có đang trong trạng thái loading không
-        loading_elements = driver.find_elements(By.CSS_SELECTOR, ".dataTables_processing")
-        if loading_elements and loading_elements[0].is_displayed():
-            return False
-
-        # 3. Kiểm tra các row trong bảng
-        rows = table.find_elements(By.TAG_NAME, "tr")
-
-        # Nếu có nhiều hơn 1 row (tính cả header), tức là có dữ liệu
-        if len(rows) > 1:
-            # Kiểm tra thêm xem row đầu tiên (sau header) có cells không
-            if len(rows[1].find_elements(By.TAG_NAME, "td")) > 0:
-                return True
-
-        # 4. Kiểm tra thông báo "No data available"
-        empty_messages = driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty")
-        if empty_messages:
-            # Kiểm tra xem thông báo có hiển thị không
-            if empty_messages[0].is_displayed():
-                return True
-
-        # 5. Kiểm tra footer của bảng
-        footer_info = driver.find_elements(By.CSS_SELECTOR, ".dataTables_info")
-        if footer_info:
-            footer_text = footer_info[0].text.lower()
-            # Nếu footer hiển thị thông tin về số lượng bản ghi
-            if "showing" in footer_text or "hiển thị" in footer_text:
-                return True
-
-        return False
-
-    except Exception as e:
-        print(f"Lỗi khi kiểm tra trạng thái bảng: {str(e)}")
-        return False
-
-def is_page_loaded(driver, short_wait=None):
-    """
-    Kiểm tra xem trang web đã load hoàn tất chưa
-
-    Args:
-        driver: WebDriver instance
-        short_wait: WebDriverWait instance với timeout ngắn (optional)
-
-    Returns:
-        bool: True nếu trang đã load hoàn tất
-    """
-    try:
-        # 1. Kiểm tra document.readyState
-        ready_state = driver.execute_script('return document.readyState')
-        if ready_state != 'complete':
-            return False
-
-        # 2. Kiểm tra jQuery (nếu trang sử dụng jQuery)
-        jquery_ready = driver.execute_script('''
-            if (typeof jQuery !== 'undefined') {
-                return jQuery.active === 0;
-            }
-            return true;
-        ''')
-        if not jquery_ready:
-            return False
-
-        # 3. Kiểm tra các request AJAX đang pending
-        ajax_complete = driver.execute_script('''
-            if (window.XMLHttpRequest) {
-                var openRequests = 0;
-                var oldSend = XMLHttpRequest.prototype.send;
-
-                if (typeof window._activeRequests === 'undefined') {
-                    window._activeRequests = 0;
-                    XMLHttpRequest.prototype.send = function() {
-                        window._activeRequests++;
-                        this.addEventListener('readystatechange', function() {
-                            if (this.readyState === 4) {
-                                window._activeRequests--;
-                            }
-                        });
-                        oldSend.apply(this, arguments);
-                    };
-                }
-                return window._activeRequests === 0;
-            }
-            return true;
-        ''')
-        if not ajax_complete:
-            return False
-
-        # 4. Kiểm tra các element loading phổ biến
-        loading_indicators = [
-            '.loading',
-            '.spinner',
-            '.preloader',
-            '.preloader-container',
-            '#loading',
-            '#spinner',
-            '.loading-overlay',
-            '.processing'
-        ]
-
-        for indicator in loading_indicators:
-            elements = driver.find_elements(By.CSS_SELECTOR, indicator)
-            for element in elements:
-                try:
-                    if element.is_displayed():
-                        return False
-                except:
-                    continue
-
-        # 5. Kiểm tra animation
-        animations_complete = driver.execute_script('''
-            var animations = document.getAnimations
-                ? document.getAnimations()
-                : document.getElementsByClassName('animated');
-            return animations.length === 0;
-        ''')
-        if not animations_complete:
-            return False
-
-        # 6. Kiểm tra các iframe (nếu có)
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        for iframe in iframes:
-            try:
-                if iframe.is_displayed():
-                    driver.switch_to.frame(iframe)
-                    iframe_ready = driver.execute_script('return document.readyState') == 'complete'
-                    driver.switch_to.parent_frame()
-                    if not iframe_ready:
-                        return False
-            except:
-                driver.switch_to.parent_frame()
-                continue
-
-        # 7. Kiểm tra error messages
-        error_indicators = [
-            '.error',
-            '.error-message',
-            '#error',
-            '.alert-error',
-            '.alert-danger'
-        ]
-
-        for indicator in error_indicators:
-            elements = driver.find_elements(By.CSS_SELECTOR, indicator)
-            for element in elements:
-                try:
-                    if element.is_displayed():
-                        error_text = element.text.lower()
-                        if 'error' in error_text or 'lỗi' in error_text:
-                            print(f"Phát hiện lỗi: {error_text}")
-                            return False
-                except:
-                    continue
-
-        return True
-
-    except Exception as e:
-        print(f"Lỗi khi kiểm tra trạng thái trang: {str(e)}")
-        return False
-
-def wait_for_page_load(driver, url, timeout=120):
-    """
-    Đợi cho trang web load hoàn tất
-
-    Args:
-        driver: WebDriver instance
-        url: URL cần truy cập
-        timeout: Thời gian tối đa chờ đợi (giây)
-
-    Returns:
-        bool: True nếu trang load thành công
-    """
-    short_wait = WebDriverWait(driver, 2)
-    start_time = time.time()
-
-    try:
-        driver.get(url)
-
-        while time.time() - start_time < timeout:
-            if is_page_loaded(driver, short_wait):
-                return True
-            time.sleep(0.5)
-        return False
-
-    except Exception as e:
-        print(f"Lỗi khi load trang {url}: {str(e)}")
-        return False
-
 def download_invoice_pdf(driver, invoice_info):
-    """
-    Download PDF của biên lai từ website
-
-    Args:
-        driver: WebDriver instance
-        invoice_info: Dict chứa thông tin biên lai
-
-    Returns:
-        bytes: PDF data nếu thành công, None nếu thất bại
-    """
+    """ Download PDF của biên lai từ website """
     try:
         invoice_url = f"http://thuphi.haiphong.gov.vn:8224/Viewer/HoaDonViewer.aspx?mhd={invoice_info['drive_link']}"
         driver.execute_script(f"window.open('{invoice_url}', '_blank');")
         new_handle = driver.window_handles[-1]
         driver.switch_to.window(new_handle)
 
-        def is_page_loaded():
-            content_element = driver.find_element(By.ID, "form1")
-            if not content_element:
-                return False
-            page_state = driver.execute_script('return document.readyState;')
-            return page_state == 'complete'
-
         start_time = time.time()
         max_wait_time = 120
         while time.time() - start_time < max_wait_time:
-            if is_page_loaded():
+            if ChromeManager.is_page_loaded(driver):
                 print_options = {
                     'landscape': False,
                     'displayHeaderFooter': False,
@@ -1270,27 +743,6 @@ def handle_login_process(driver, tax_number):
     long_wait = WebDriverWait(driver, 120)  # 2 phút
     short_wait = WebDriverWait(driver, 2)   # 2 giây
 
-    def is_page_loaded():
-        try:
-            return driver.execute_script("return document.readyState") == "complete"
-        except:
-            return False
-
-    def wait_for_page_load(url, timeout=120):
-        start_time = time.time()
-        driver.get(url)
-
-        while time.time() - start_time < timeout:
-            try:
-                if is_page_loaded():
-                    # Thêm delay ngắn để đảm bảo JS đã chạy
-                    time.sleep(0.5)
-                    return True
-            except:
-                pass
-            time.sleep(0.5)
-        return False
-
     # Kiểm tra URL hiện tại
     current_url = driver.current_url
     is_login_page = "dang-nhap" in current_url
@@ -1304,19 +756,19 @@ def handle_login_process(driver, tax_number):
     # Login process
     login_success = False
 
-    cookies_loaded = load_cookies(driver, tax_number)
+    cookies_loaded = CookieManager.load_cookies(driver, tax_number)
     if cookies_loaded:
-        if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/Home"):
+        if ChromeManager.wait_for_page_load(driver, ChromeManager.HOME_URL):
             try:
-                long_wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
+                long_wait.until(lambda d: ChromeManager.is_page_loaded(d))
                 login_success = "dang-nhap" not in driver.current_url
             except:
                 print("Timeout khi đợi trang Home load hoàn tất")
 
     if not login_success:
-        if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/dang-nhap"):
+        if ChromeManager.wait_for_page_load(driver, ChromeManager.LOGIN_URL):
             long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-            if fill_login_info(driver, tax_number, tax_number):
+            if ChromeManager.fill_login_info(driver, tax_number, tax_number):
                 login_success = True
 
     if not login_success:

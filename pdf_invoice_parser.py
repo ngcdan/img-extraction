@@ -76,7 +76,10 @@ def extract_header_info(lines):
 
         if mau_so_index != -1:
             if mau_so_index + 1 < len(lines) and lines[mau_so_index + 1].startswith("Số:"):
-                result['so_ct'] = lines[mau_so_index + 1].replace("Số:", "").strip()
+                so_ct = lines[mau_so_index + 1].replace("Số:", "").strip()
+                # Kiểm tra số chứng từ bắt đầu bằng 2025 và chỉ chứa số
+                if so_ct.isdigit() and so_ct.startswith('2025'):
+                    result['so_ct'] = str(so_ct)  # Đảm bảo lưu dạng string
 
         # Tạo các biến thể của từ "công ty"
         company_variants = [
@@ -115,7 +118,7 @@ def extract_header_info(lines):
                 for j in range(i + 1, min(i + 4, len(lines))):
                     potential_tax = lines[j].strip()
                     if potential_tax.isdigit() and potential_tax != "Địa chỉ:":
-                        result['tax_number'] = potential_tax
+                        result['tax_number'] = str(potential_tax)  # Ensure it's stored as string
                         break
                 break
 
@@ -124,7 +127,7 @@ def extract_header_info(lines):
                 if i + 2 < len(lines):
                     customs_number = lines[i + 2].strip()
                     if customs_number.isdigit():
-                        result['customs_number'] = customs_number
+                        result['customs_number'] = str(customs_number)  # Đảm bảo lưu dạng string
                     # Tìm ngày ở phần tử tiếp theo sau số tờ khai
                     if i + 3 < len(lines):
                         potential_date = lines[i + 3].strip()

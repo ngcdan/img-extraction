@@ -676,7 +676,7 @@ def fill_login_info(driver, username, password, max_wait_time=240):  # 4 phút t
                 # async_save_data(username, last_captcha, driver)
                 if last_captcha['text'] and last_captcha['image']:
                     save_captcha_and_label(last_captcha['image'], last_captcha['text'])
-                # save_cookies(driver, username)
+                save_cookies(driver, username)
                 return True
 
             # Kiểm tra URL hiện tại
@@ -807,7 +807,7 @@ def save_cookies(driver, username):
 def load_cookies(driver, username):
     """Load cookies cho username"""
     try:
-        if not os.path.exists(f'cookies/{username}.cookies'):
+        if not os.path.exists(f'cookies/{username}.cookies') or not os.path.exists('cookies'):
             return False
         with open(f'cookies/{username}.cookies', 'r') as f:
             cookies = json.load(f)
@@ -822,24 +822,37 @@ def load_cookies(driver, username):
 
 def clear_all_cookies_and_sessions(driver):
     try:
-        """Xóa tất cả cookies và sessions trên browser"""
-        driver.delete_all_cookies()
-        # Xóa localStorage và sessionStorage
-        driver.execute_script("""
-            window.localStorage.clear();
-            window.sessionStorage.clear();
-        """)
-        # Refresh trang để đảm bảo các thay đổi có hiệu lực
-        driver.refresh()
+        """Xóa cookies và sessions của domain thuphi.haiphong.gov.vn"""
+        target_domain = "thuphi.haiphong.gov.vn"
 
-        # Xóa thư mục cookies nếu tồn tại
-        if os.path.exists('cookies'):
-            for cookie_file in os.listdir('cookies'):
-                try:
-                    os.remove(os.path.join('cookies', cookie_file))
-                except Exception as e:
-                    print(f"Lỗi khi xóa file cookie {cookie_file}: {str(e)}")
-            os.rmdir('cookies')
+        # Lấy tất cả cookies hiện tại
+        all_cookies = driver.get_cookies()
+
+        # Chỉ xóa cookies của domain cần thiết
+        for cookie in all_cookies:
+            if target_domain in cookie.get('domain', ''):
+                driver.delete_cookie(cookie['name'])
+
+        # Xóa localStorage và sessionStorage chỉ khi đang ở domain cần thiết
+        current_url = driver.current_url
+        if target_domain in current_url:
+            driver.execute_script("""
+                window.localStorage.clear();
+                window.sessionStorage.clear();
+            """)
+            # Refresh trang để đảm bảo các thay đổi có hiệu lực
+            driver.refresh()
+
+        # Xóa file cookie cụ thể trong thư mục cookies
+        # if os.path.exists('cookies'):
+        #     target_cookie_file = None
+        #     for cookie_file in os.listdir('cookies'):
+        #         if target_domain in cookie_file:
+        #             try:
+        #                 os.remove(os.path.join('cookies', cookie_file))
+        #                 print(f"Đã xóa file cookie: {cookie_file}")
+        #             except Exception as e:
+        #                 print(f"Lỗi khi xóa file cookie {cookie_file}: {str(e)}")
         return True
     except Exception as e:
         print(f"Lỗi khi xóa cookies và sessions: {str(e)}")
@@ -1291,14 +1304,14 @@ def handle_login_process(driver, tax_number):
     # Login process
     login_success = False
 
-    # cookies_loaded = load_cookies(driver, tax_number)
-    # if cookies_loaded:
-    #     if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/Home"):
-    #         try:
-    #             long_wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
-    #             login_success = "dang-nhap" not in driver.current_url
-    #         except:
-    #             print("Timeout khi đợi trang Home load hoàn tất")
+    cookies_loaded = load_cookies(driver, tax_number)
+    if cookies_loaded:
+        if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/Home"):
+            try:
+                long_wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
+                login_success = "dang-nhap" not in driver.current_url
+            except:
+                print("Timeout khi đợi trang Home load hoàn tất")
 
     if not login_success:
         if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/dang-nhap"):

@@ -15,7 +15,7 @@ SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
 HEADER_ROW = [
     'STT', 'Số chứng từ', 'PartnerID', 'PartnerName', 'JobNo', 'HBLNo', 'Custom No',
     'FeeCode', 'FeeName', 'Quantity', 'Unit', 'Amount', 'VAT',
-    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate', 'PartnerID_Inv', 'PartnerName_Inv'
+    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate', 'Partner TaxNo', 'PartnerName_Inv', 'PartnerID_Inv'
 ]
 
 class SheetService:
@@ -138,13 +138,95 @@ class SheetService:
             # Lấy sheet ID mới
             new_sheet_id = result['replies'][0]['addSheet']['properties']['sheetId']
 
-            # Thêm header
-            range_name = f"'{sheet_name}'!A1:T1"
+            # Thêm header với định dạng
+            range_name = f"'{sheet_name}'!A1:U1"
             self._service.spreadsheets().values().update(
                 spreadsheetId=SPREADSHEET_ID,
                 range=range_name,
                 valueInputOption='RAW',
                 body={'values': [HEADER_ROW]}
+            ).execute()
+
+            # Định dạng header
+            requests = [
+                # Định dạng chung cho header
+                {
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': new_sheet_id,
+                            'startRowIndex': 0,
+                            'endRowIndex': 1,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': len(HEADER_ROW)
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'backgroundColor': {
+                                    'red': 1.0,
+                                    'green': 0.427,  # 109/255
+                                    'blue': 0.004,   # 1/255
+                                },
+                                'textFormat': {
+                                    'bold': True
+                                },
+                                'verticalAlignment': 'MIDDLE',
+                                'horizontalAlignment': 'CENTER'
+                            }
+                        },
+                        'fields': 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment)'
+                    }
+                },
+                # Điều chỉnh độ rộng cột cho PartnerName (index 3)
+                {
+                    'updateDimensionProperties': {
+                        'range': {
+                            'sheetId': new_sheet_id,
+                            'dimension': 'COLUMNS',
+                            'startIndex': 3,
+                            'endIndex': 4
+                        },
+                        'properties': {
+                            'pixelSize': 300  # Độ rộng mặc định * 3
+                        },
+                        'fields': 'pixelSize'
+                    }
+                },
+                # Điều chỉnh độ rộng cột cho FeeName (index 8)
+                {
+                    'updateDimensionProperties': {
+                        'range': {
+                            'sheetId': new_sheet_id,
+                            'dimension': 'COLUMNS',
+                            'startIndex': 8,
+                            'endIndex': 9
+                        },
+                        'properties': {
+                            'pixelSize': 300
+                        },
+                        'fields': 'pixelSize'
+                    }
+                },
+                # Điều chỉnh độ rộng cột cho PartnerName_Inv (index 19)
+                {
+                    'updateDimensionProperties': {
+                        'range': {
+                            'sheetId': new_sheet_id,
+                            'dimension': 'COLUMNS',
+                            'startIndex': 19,
+                            'endIndex': 20
+                        },
+                        'properties': {
+                            'pixelSize': 300
+                        },
+                        'fields': 'pixelSize'
+                    }
+                }
+            ]
+
+            # Thực hiện các thay đổi định dạng
+            self._service.spreadsheets().batchUpdate(
+                spreadsheetId=SPREADSHEET_ID,
+                body={'requests': requests}
             ).execute()
 
             # Cập nhật cache
@@ -181,7 +263,7 @@ class SheetService:
 def execute_append(sheet, sheet_name, values):
     """Thực hiện append dữ liệu vào sheet với retry logic"""
     body = {'values': values}
-    range_name = f"'{sheet_name}'!A:T"
+    range_name = f"'{sheet_name}'!A:U"
     return sheet.values().append(
         spreadsheetId=SPREADSHEET_ID,
         range=range_name,
@@ -225,12 +307,12 @@ def append_to_google_sheet_new(extracted_info):
         values = []
         row_data = [
             current_row,  # STT
-            extracted_info.get('so_ct', ''),  # Số chứng từ
+            f"'{extracted_info.get('so_ct', '')}'",  # Số chứng từ - thêm dấu nháy để giữ số 0
             fixed_data['service_code'],
             fixed_data['vendor'],
             extracted_info.get('jobId', ''),
             extracted_info.get('hawb', ''),
-            extracted_info.get('custom_no', ''),
+            f"'{extracted_info.get('custom_no', '')}'",  # Số tờ khai - thêm dấu nháy để giữ số 0
             fixed_data['charge_code'],
             fixed_data['description'],
             1,
@@ -239,11 +321,12 @@ def append_to_google_sheet_new(extracted_info):
             '', # tax
             extracted_info.get('total_amount', ''),
             extracted_info.get('tax_number', '') != '0303482440',
-            extracted_info.get('invoice_no', ''),
+            f"'{extracted_info.get('invoice_no', '')}'",  # Số hóa đơn - thêm dấu nháy để giữ số 0
             extracted_info.get('seriesNo', ''),
             extracted_info.get('ngay', ''),
-            extracted_info.get('tax_number'),
+            f"'{extracted_info.get('tax_number', '')}'",  # Mã số thuế - thêm dấu nháy để giữ số 0
             extracted_info.get('partner_invoice_name'),
+            ''
         ]
         values.append(row_data)
 

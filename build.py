@@ -5,6 +5,54 @@ from pathlib import Path
 import argparse
 import shutil
 import tempfile
+from PIL import Image
+
+def convert_to_ico(jpg_path, ico_path):
+    """Convert JPG to ICO format"""
+    try:
+        img = Image.open(jpg_path)
+        # Resize to standard icon sizes
+        icon_sizes = [(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)]
+        img.save(ico_path, format='ICO', sizes=icon_sizes)
+        return True
+    except Exception as e:
+        print(f"Error converting to ICO: {e}")
+        return False
+
+def convert_to_icns(jpg_path, icns_path):
+    """Convert JPG to ICNS format for macOS"""
+    try:
+        img = Image.open(jpg_path)
+        # Resize to 1024x1024 (standard size for macOS icons)
+        img = img.resize((1024,1024))
+        img.save(icns_path, format='ICNS')
+        return True
+    except Exception as e:
+        print(f"Error converting to ICNS: {e}")
+        return False
+
+def prepare_icon():
+    """Prepare icon files from avatar.jpg"""
+    avatar_path = 'avatar.jpg'
+    if not os.path.exists(avatar_path):
+        print("Warning: avatar.jpg not found")
+        return None
+
+    # Create static directory if it doesn't exist
+    static_dir = Path('static')
+    static_dir.mkdir(exist_ok=True)
+
+    icon_path = None
+    if sys.platform == 'win32':
+        icon_path = static_dir / 'icon.ico'
+        if convert_to_ico(avatar_path, icon_path):
+            print(f"Created icon at: {icon_path}")
+    else:  # macOS
+        icon_path = static_dir / 'icon.icns'
+        if convert_to_icns(avatar_path, icon_path):
+            print(f"Created icon at: {icon_path}")
+
+    return icon_path
 
 def install_requirements():
     """Install required packages"""
@@ -46,6 +94,9 @@ def build_application(show_console=True):
     # Define main file and data files
     main_file = 'test_batch_process.py'
 
+    # Prepare icon
+    icon_path = prepare_icon()
+
     # Process sensitive files
     sensitive_data_files = prepare_sensitive_files()  # Removed temp_dir parameter
 
@@ -81,7 +132,7 @@ def build_application(show_console=True):
     if sys.platform == 'win32':
         options.extend([
             '--uac-admin',        # Request admin privileges
-            '--icon=static/icon.ico' if os.path.exists('static/icon.ico') else None
+            f'--icon={icon_path}' if icon_path else None
         ])
 
         # Add --noconsole only if show_console is False
@@ -90,7 +141,7 @@ def build_application(show_console=True):
 
     else:  # macOS
         options.extend([
-            '--icon=static/icon.icns' if os.path.exists('static/icon.icns') else None
+            f'--icon={icon_path}' if icon_path else None
         ])
 
     # Add data files
@@ -126,6 +177,9 @@ if __name__ == '__main__':
     parser.add_argument('--no-console', action='store_true',
                       help='Hide console window in Windows build')
     args = parser.parse_args()
+
+    # Install Pillow if not already installed
+    # subprocess.run([sys.executable, '-m', 'pip', 'install', 'Pillow'])
 
     print("Installing requirements...")
     install_requirements()

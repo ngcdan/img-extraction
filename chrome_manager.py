@@ -28,11 +28,27 @@ class ChromeManager:
                 # Xác định đường dẫn profile mặc định của Chrome
                 if platform.system() == 'Windows':
                     default_profile = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
+                    chrome_path = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+                    if not os.path.exists(chrome_path):
+                        chrome_path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
                 else:  # macOS
                     default_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
+                    chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+
+                # Kill tất cả các process Chrome debug hiện tại
+                if platform.system() == 'Windows':
+                    os.system('taskkill /f /im "chrome.exe" >nul 2>&1')
+                else:
+                    os.system('pkill -f "Chrome.*--remote-debugging-port=9222" >/dev/null 2>&1')
+
+                time.sleep(2)  # Đợi process được kill hoàn toàn
 
                 # Thiết lập options cho Chrome
                 chrome_options = webdriver.ChromeOptions()
+                chrome_options.add_argument(f'--user-data-dir={default_profile}')
+                chrome_options.add_argument('--remote-debugging-port=9222')
+                chrome_options.add_argument('--no-first-run')
+                chrome_options.add_argument('--no-default-browser-check')
                 chrome_options.add_argument('--no-sandbox')
                 chrome_options.add_argument('--disable-dev-shm-usage')
                 chrome_options.add_argument('--disable-gpu')
@@ -40,18 +56,29 @@ class ChromeManager:
                 chrome_options.add_argument('--disable-extensions')
                 chrome_options.add_argument('--disable-popup-blocking')
                 chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+                chrome_options.add_argument('--disable-save-password-bubble')  # Tắt popup lưu password
+                chrome_options.add_argument('--disable-notifications')  # Tắt tất cả các notifications
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
+
+                # Tắt hoàn toàn các popup credentials
+                prefs = {
+                    "credentials_enable_service": False,
+                    "profile.password_manager_enabled": False,
+                    "profile.default_content_setting_values.notifications": 2  # 2 = block
+                }
+                chrome_options.add_experimental_option("prefs", prefs)
 
                 # Khởi tạo service và driver
                 service = Service(ChromeDriverManager().install())
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                    "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    "userAgent": 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
                 })
 
-                # Thiết lập kích thước cửa sổ
-                driver.set_window_size(1920, 1080)
+                # Thiết lập kích thước cửa sổ iPhone 14 Pro Max
+                driver.set_window_size(430, 932)
+                print("Đã kết nối với Chrome thành công")
                 return driver
 
             except Exception as e:

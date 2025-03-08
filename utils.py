@@ -1,6 +1,7 @@
 import os
 import sys
 import platform
+from datetime import datetime
 
 def get_default_customs_dir():
     """Lấy đường dẫn thư mục customs mặc định trên Desktop"""
@@ -33,3 +34,14 @@ def get_resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
+
+def parse_date(date_str):
+    """Chuyển đổi chuỗi ngày dạng 'dd/mm/yyyy' thành đối tượng datetime"""
+    try:
+        return datetime.strptime(date_str, '%d/%m/%Y')
+    except (ValueError, TypeError):
+        return None
+
+def format_date(date_obj):
+    """Chuyển đổi đối tượng datetime thành chuỗi 'dd/mm/yyyy'"""
+    return date_obj.strftime('%d/%m/%Y') if date_obj else None

@@ -17,39 +17,34 @@ import base64
 import json
 import asyncio
 import shutil
-
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
 import io
-from google_drive_utils import upload_file_to_drive, DriveService, get_or_create_folder, check_file_exists, append_to_labels_file
-
 import os
 import sys
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple
 from pdfminer.high_level import extract_text
+
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
+from google_drive_utils import (
+    upload_file_to_drive,
+    DriveService,
+    get_or_create_folder,
+    check_file_exists,
+    append_to_labels_file
+)
+
 from google_sheet_utils import append_to_google_sheet_new
 
-# Import các hàm helper từ extract_info.py
-from extract_info import (
-    split_sections,
+from pdf_invoice_parser import (
+    extract_text_from_pdf,
     extract_header_info,
     convert_price_to_number
 )
 
-from utils import get_default_customs_dir
-
-def parse_date(date_str):
-    """Chuyển đổi chuỗi ngày dạng 'dd/mm/yyyy' thành đối tượng datetime"""
-    try:
-        return datetime.strptime(date_str, '%d/%m/%Y')
-    except (ValueError, TypeError):
-        return None
-
-def format_date(date_obj):
-    """Chuyển đổi đối tượng datetime thành chuỗi 'dd/mm/yyyy'"""
-    return date_obj.strftime('%d/%m/%Y') if date_obj else None
+from utils import get_default_customs_dir, parse_date, format_date
 
 def extract_files_info(files: List[str]) -> Tuple[List[Dict], Dict]:
     """
@@ -73,9 +68,7 @@ def extract_files_info(files: List[str]) -> Tuple[List[Dict], Dict]:
             with open(file_path, 'rb') as pdf_file:
                 file_content = pdf_file.read()
 
-            text = extract_text(io.BytesIO(file_content))
-            sections = split_sections(text)
-
+            sections = extract_text_from_pdf(io.BytesIO(file_content))
             if not sections:
                 print(f"Không thể phân tích file: {file_path}")
                 continue
@@ -179,172 +172,166 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
         drive_upload_results = []
         download_results = []
-
         # 1. Trích xuất thông tin từ files
         extracted_results, cached_extracted_files = extract_files_info(files)
-
         # 2. Nhóm kết quả theo tax_number
         grouped_results = group_results_by_tax_number(extracted_results)
-
         # 3. Thực hiện download và write dữ liệu
         for tax_number, customs_numbers in grouped_results.items():
             session = requests.Session()
             session.verify = False
             success_count = 0
 
-            # Kiểm tra URL hiện tại
-            current_url = driver.current_url
-            is_login_page = "dang-nhap" in current_url
-            is_blank_page = current_url in ["about:blank", "chrome://newtab/"]
-
-            # Chỉ mở tab mới nếu không phải trang login hoặc trang trống
-            if not (is_login_page or is_blank_page):
-                driver.execute_script("window.open('about:blank', '_blank');")
-                driver.switch_to.window(driver.window_handles[-1])
-
-            # Khởi tạo WebDriverWait với timeout dài hơn
-            long_wait = WebDriverWait(driver, 120)  # 2 phút
-            short_wait = WebDriverWait(driver, 2)   # 2 giây
-
-            def is_page_loaded():
-                try:
-                    return driver.execute_script("return document.readyState") == "complete"
-                except:
-                    return False
-
-            def wait_for_page_load(url, timeout=120):
-                start_time = time.time()
-                driver.get(url)
-
-                while time.time() - start_time < timeout:
-                    try:
-                        if is_page_loaded():
-                            # Thêm delay ngắn để đảm bảo JS đã chạy
-                            time.sleep(0.5)
-                            return True
-                    except:
-                        pass
-                    time.sleep(0.5)
-                return False
-
-            # Login process
-            login_success = False
-
-            # cookies_loaded = load_cookies(driver, tax_number)
-            # # Kiểm tra URL sau khi chuyển hướng
-            # if cookies_loaded:
-            #     if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/Home"):
-            #         try:
-            #             # Đợi cho đến khi có thể tương tác với trang
-            #             long_wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
-            #             login_success = "dang-nhap" not in driver.current_url
-            #         except:
-            #             print("Timeout khi đợi trang Home load hoàn tất")
-
-            if not login_success:
-                if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/dang-nhap"):
-                    long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-                    if fill_login_info(driver, tax_number, tax_number):
-                        login_success = True
-
-            if not login_success:
-                raise Exception(f"Không thể đăng nhập với MST {tax_number}")
-
-            # Truy cập trang tìm kiếm
-            driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
-
-            # Tăng thời gian chờ tối đa lên 60 giây
-            wait = WebDriverWait(driver, 60)
-            short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
-
             try:
-                preloader = short_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-            except:
-                pass
+                # Xử lý đăng nhập
+                if not handle_login_process(driver, tax_number):
+                    print(f"Không thể đăng nhập với MST {tax_number} - bỏ qua và chuyển sang MST tiếp theo")
+                    download_results.append({
+                        'tax_number': tax_number,
+                        'status': 'error',
+                        'customs_count': len(customs_numbers),
+                        'success_count': 0,
+                        'error': 'Lỗi đăng nhập'
+                    })
+                    continue
 
-            start_time = time.time()
-            while time.time() - start_time < 60:  # Tối đa 60 giây
-                if not driver.find_elements(By.CLASS_NAME, "preloader-container"):
-                    if is_table_loaded_with_data(driver, short_wait):
-                        break
-                time.sleep(0.5)  # Đợi 500ms trước khi check lại
+                # Truy cập trang tìm kiếm
+                driver.get("http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu")
 
-            if not is_table_loaded_with_data(driver, short_wait):
-                raise Exception("Không thể load dữ liệu bảng sau 60 giây")
+                # Tăng thời gian chờ tối đa lên 60 giây
+                wait = WebDriverWait(driver, 60)
+                short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
 
-            # get first customs
-            customs = customs_numbers[0]
-
-            # Lấy ngày đầu tiên của tháng hiện tại
-            today = datetime.now()
-            first_day_of_month = today.replace(day=1)
-            min_date = parse_date(customs['min_date'])
-
-            # Kiểm tra nếu min_date bé hơn ngày đầu tháng
-            if min_date < first_day_of_month:
-                # Điền form tìm kiếm
                 try:
-                    # Đợi và điền ngày bắt đầu
-                    tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
-                    tu_ngay_input.clear()
-                    tu_ngay_input.send_keys(customs['min_date'])
+                    preloader = short_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
+                except:
+                    pass
 
-                    # Đợi và điền ngày kết thúc
-                    den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
-                    den_ngay_input.clear()
-                    den_ngay_input.send_keys(customs['max_date'])
+                start_time = time.time()
+                while time.time() - start_time < 60:  # Tối đa 60 giây
+                    if not driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                        if is_table_loaded_with_data(driver, short_wait):
+                            break
+                    time.sleep(0.5)  # Đợi 500ms trước khi check lại
 
-                except Exception as e:
-                    raise Exception(f"Lỗi khi điền form tìm kiếm: {str(e)}")
+                if not is_table_loaded_with_data(driver, short_wait):
+                    print(f"MST {tax_number}: Không thể load dữ liệu bảng sau 60 giây - bỏ qua")
+                    download_results.append({
+                        'tax_number': tax_number,
+                        'status': 'error',
+                        'customs_count': len(customs_numbers),
+                        'success_count': 0,
+                        'error': 'Timeout load bảng dữ liệu'
+                    })
+                    continue
 
-                max_retries = 3
-                retry_count = 0
-                while retry_count < max_retries:
+                # get first customs
+                customs = customs_numbers[0]
+
+                # Lấy ngày đầu tiên của tháng hiện tại
+                today = datetime.now()
+                first_day_of_month = today.replace(day=1)
+                min_date = parse_date(customs['min_date'])
+
+                # Kiểm tra nếu min_date bé hơn ngày đầu tháng
+                if min_date < first_day_of_month:
+                    # Điền form tìm kiếm
                     try:
-                        search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                        driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
-                        driver.execute_script("arguments[0].click();", search_button)
+                        tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
+                        tu_ngay_input.clear()
+                        tu_ngay_input.send_keys(customs['min_date'])
 
-                        def is_search_complete():
-                            try:
-                                if driver.find_elements(By.CLASS_NAME, "preloader-container"):
-                                    return False
-                                table = driver.find_element(By.ID, "TBLDANHSACH")
-                                if not table:
-                                    return False
-
-                                new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
-                                has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
-
-                                if new_rows > 0 or has_no_data:
-                                    return True
-                                return False
-                            except Exception:
-                                return False
-
-                        # Đợi với timeout 30 giây nhưng phản ứng nhanh khi có kết quả
-                        start_time = time.time()
-                        search_completed = False
-                        while time.time() - start_time < 30:
-                            if is_search_complete():
-                                search_completed = True
-                                break
-                            time.sleep(0.1)
-
-                        if search_completed:
-                            break  # Thoát khỏi vòng lặp retry
-                        else:
-                            raise TimeoutException("Timeout chờ kết quả tìm kiếm")
+                        den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
+                        den_ngay_input.clear()
+                        den_ngay_input.send_keys(customs['max_date'])
 
                     except Exception as e:
-                        retry_count += 1
-                        if retry_count == max_retries:
-                            raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
-                        time.sleep(1)
+                        print(f"MST {tax_number}: Lỗi khi điền form tìm kiếm: {str(e)} - bỏ qua")
+                        download_results.append({
+                            'tax_number': tax_number,
+                            'status': 'error',
+                            'customs_count': len(customs_numbers),
+                            'success_count': 0,
+                            'error': f'Lỗi điền form: {str(e)}'
+                        })
+                        continue
 
-            # Tìm bảng và trích xuất số tờ khai
-            table = driver.find_element(By.ID, "TBLDANHSACH")
-            rows = table.find_elements(By.TAG_NAME, "tr")
+                    search_success = False
+                    max_retries = 3
+                    retry_count = 0
+
+                    while retry_count < max_retries:
+                        try:
+                            search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
+                            driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
+                            driver.execute_script("arguments[0].click();", search_button)
+
+                            def is_search_complete():
+                                try:
+                                    if driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                                        return False
+                                    table = driver.find_element(By.ID, "TBLDANHSACH")
+                                    if not table:
+                                        return False
+
+                                    new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
+                                    has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
+
+                                    if new_rows > 0 or has_no_data:
+                                        return True
+                                    return False
+                                except Exception:
+                                    return False
+
+                            start_time = time.time()
+                            while time.time() - start_time < 30:
+                                if is_search_complete():
+                                    search_success = True
+                                    break
+                                time.sleep(0.1)
+
+                            if search_success:
+                                break
+
+                        except Exception as e:
+                            retry_count += 1
+                            if retry_count == max_retries:
+                                print(f"MST {tax_number}: Không thể hoàn thành tìm kiếm sau {max_retries} lần thử - bỏ qua")
+                                download_results.append({
+                                    'tax_number': tax_number,
+                                    'status': 'error',
+                                    'customs_count': len(customs_numbers),
+                                    'success_count': 0,
+                                    'error': f'Lỗi tìm kiếm sau {max_retries} lần thử'
+                                })
+                                continue
+                            time.sleep(1)
+
+                try:
+                    # Tìm bảng và trích xuất số tờ khai
+                    table = driver.find_element(By.ID, "TBLDANHSACH")
+                    rows = table.find_elements(By.TAG_NAME, "tr")
+                except Exception as e:
+                    print(f"MST {tax_number}: Lỗi khi tìm bảng dữ liệu: {str(e)} - bỏ qua")
+                    download_results.append({
+                        'tax_number': tax_number,
+                        'status': 'error',
+                        'customs_count': len(customs_numbers),
+                        'success_count': 0,
+                        'error': f'Lỗi load bảng: {str(e)}'
+                    })
+                    continue
+
+            except Exception as e:
+                print(f"MST {tax_number}: Lỗi không xác định: {str(e)} - bỏ qua")
+                download_results.append({
+                    'tax_number': tax_number,
+                    'status': 'error',
+                    'customs_count': len(customs_numbers),
+                    'success_count': 0,
+                    'error': f'Lỗi không xác định: {str(e)}'
+                })
+                continue
 
             matched_results = []
             for row in rows[1:]:  # Bỏ qua row đầu tiên (header)
@@ -392,103 +379,123 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     customs for customs in customs_numbers
                     if str(customs['customs_number']) not in matched_customs_numbers
                 ]
+                for customs in unmatched_customs:
+                    try:
+                        so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
+                        so_tk_input.clear()
+                        so_tk_input.send_keys(customs['customs_number'])
 
-                for invoice_info in unmatched_customs:
-                    so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
-                    so_tk_input.clear()
-                    so_tk_input.send_keys(invoice_info['customs_number'])
+                        # tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
+                        # tu_ngay_input.clear()
 
-                    tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
-                    tu_ngay_input.clear()
+                        # den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
+                        # den_ngay_input.clear()
 
-                    den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
-                    den_ngay_input.clear()
+                        max_retries = 3
+                        retry_count = 0
+                        while retry_count < max_retries:
+                            try:
+                                search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
+                                driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
+                                driver.execute_script("arguments[0].click();", search_button)
+                                # time.sleep(10)
 
-                    max_retries = 3
-                    retry_count = 0
-                    while retry_count < max_retries:
-                        try:
-                            search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                            driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
-                            driver.execute_script("arguments[0].click();", search_button)
-
-                            def is_search_complete():
-                                try:
-                                    if driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                                def is_search_complete():
+                                    try:
+                                        if driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                                            return False
+                                        table = driver.find_element(By.ID, "TBLDANHSACH")
+                                        if not table:
+                                            return False
+                                        new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
+                                        has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
+                                        if new_rows > 0 or has_no_data:
+                                            return True
                                         return False
-                                    table = driver.find_element(By.ID, "TBLDANHSACH")
-                                    if not table:
+                                    except Exception:
                                         return False
-                                    new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
-                                    has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
-                                    if new_rows > 0 or has_no_data:
-                                        return True
-                                    return False
-                                except Exception:
-                                    return False
 
-                            start_time = time.time()
-                            search_completed = False
-                            while time.time() - start_time < 30:
-                                if is_search_complete():
-                                    search_completed = True
-                                    break
-                                time.sleep(0.1)  # Check mỗi 100ms
+                                start_time = time.time()
+                                search_completed = False
+                                while time.time() - start_time < 30:
+                                    if is_search_complete():
+                                        search_completed = True
+                                        break
+                                    time.sleep(0.1)  # Check mỗi 100ms
 
-                            if search_completed:
-                                break  # Thoát khỏi vòng lặp retry
-                            else:
-                                raise TimeoutException("Timeout chờ kết quả tìm kiếm")
+                                if search_completed:
+                                    break  # Thoát khỏi vòng lặp retry
+                                else:
+                                    raise TimeoutException("Timeout chờ kết quả tìm kiếm")
 
-                        except Exception as e:
-                            retry_count += 1
-                            if retry_count == max_retries:
-                                raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
-                            time.sleep(1)
+                            except Exception as e:
+                                retry_count += 1
+                                print(f"- Lỗi: {str(e)}")
+                                if retry_count == max_retries:
+                                    raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
+                                print(f"- Đợi 4s trước khi thử lại...")
+                                time.sleep(4)  # Tăng thời gian chờ giữa các lần thử
 
-                    table = driver.find_element(By.ID, "TBLDANHSACH")
-                    rows = table.find_elements(By.TAG_NAME, "tr")
+                        table = driver.find_element(By.ID, "TBLDANHSACH")
+                        rows = table.find_elements(By.TAG_NAME, "tr")
 
-                    if len(rows) <= 1:  # Chỉ có header
+                        if len(rows) <= 1:  # Chỉ có header
+                            continue
+
+                        first_row = rows[1]
+                        cells = first_row.find_elements(By.TAG_NAME, "td")
+
+                        if len(cells) == 1 and "No data available" in cells[0].text:
+                            continue
+
+                        found_custom_no = str(cells[4].text.strip())
+                        print(f"Đã tìm thấy tờ khai {found_custom_no}")
+
+                        if found_custom_no == str(customs['customs_number']):
+                            try:
+                                link_cell = cells[1]
+                                link_element = link_cell.find_element(By.TAG_NAME, "a")
+                                href = link_element.get_attribute("href")
+                                mhd = href.split("mhd=")[-1] if "mhd=" in href else ""
+
+                                raw_series_no = cells[7].text.strip() if len(cells) > 7 else ''
+                                seriesNo = raw_series_no.split('/')[-1].strip() if '/' in raw_series_no else raw_series_no
+
+                                result = {
+                                    'custom_no': found_custom_no,
+                                    'invoice_no': cells[8].text.strip() if len(cells) > 8 else '',
+                                    'seriesNo': seriesNo,
+                                    'ngay': cells[9].text.strip() if len(cells) > 9 else '',
+                                    'total_amount': convert_price_to_number(cells[11].text.strip()) if len(cells) > 11 else 0,
+                                    'drive_link': mhd,
+                                    'tax_number': customs.get('tax_number'),
+                                    'so_ct': customs.get('so_ct', ''),
+                                    'partner_invoice_name': customs.get('partner_invoice_name', ''),
+                                    'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                }
+                                matched_results.append(result)
+                            except:
+                                print(f"Lỗi khi trích xuất dữ liệu tờ khai {found_custom_no}")
+                                print(f"Cells: {cells}")
+                                continue
+
+                        else:
+                            continue
+
+                    except Exception as e:
+                        print(f"Lỗi khi tìm kiếm tờ khai {customs['customs_number']}: {str(e)}")
                         continue
 
-                    first_row = rows[1]
-                    cells = first_row.find_elements(By.TAG_NAME, "td")
+                # Thông báo kết quả cuối cùng
+                final_unmatched = [
+                    customs for customs in customs_numbers
+                    if str(customs['customs_number']) not in {str(result['custom_no']) for result in matched_results}
+                ]
 
-                    if len(cells) == 1 and "No data available" in cells[0].text:
-                        continue
-
-                    found_custom_no = str(cells[4].text.strip())
-
-                    if found_custom_no == str(customs['customs_number']):
-                        link_cell = cells[1]
-                        link_element = link_cell.find_element(By.TAG_NAME, "a")
-                        href = link_element.get_attribute("href")
-                        mhd = href.split("mhd=")[-1] if "mhd=" in href else ""
-
-                        raw_series_no = cells[7].text.strip() if len(cells) > 7 else ''
-                        seriesNo = raw_series_no.split('/')[-1].strip() if '/' in raw_series_no else raw_series_no
-
-                        result = {
-                            'custom_no': found_custom_no,
-                            'invoice_no': cells[8].text.strip() if len(cells) > 8 else '',
-                            'seriesNo': seriesNo,
-                            'ngay': cells[9].text.strip() if len(cells) > 9 else '',
-                            'total_amount': convert_price_to_number(cells[11].text.strip()) if len(cells) > 11 else 0,
-                            'drive_link': mhd,
-                            'tax_number': customs.get('tax_number'),
-                            'so_ct': customs.get('so_ct', ''),
-                            'partner_invoice_name': customs.get('partner_invoice_name', ''),
-                            'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        }
-                        matched_results.append(result)
-                    else:
-                        continue
-
-                if len(matched_results) != len(customs_numbers):
-                    print("\nDanh sách thông tin tờ khai cần xử lý:\n")
-                    print(json.dumps(unmatched_customs, indent=2, ensure_ascii=False))
-                    raise Exception(f"\nSố lượng biên lai khớp không bằng số lượng tờ khai cần xử lý. Còn {len(unmatched_customs)} tờ khai chưa khớp.\n\n\n")
+                if final_unmatched:
+                    print("\nDanh sách tờ khai không tìm thấy và sẽ bị bỏ qua:")
+                    for customs in final_unmatched:
+                        print(f"- Số tờ khai: {customs['customs_number']}")
 
             success_count, drive_upload_results = process_matched_results(driver, matched_results, cached_extracted_files)
 
@@ -547,7 +554,7 @@ def fill_login_info(driver, username, password, max_wait_time=240):  # 4 phút t
     login_url = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
     home_url = "http://thuphi.haiphong.gov.vn:8222/Home"
     start_time = time.time()
-    last_captcha = {'text': None, 'image': None}  # Cache captcha cuối cùng
+    last_captcha = {'text': None, 'image': None}
 
     def is_login_successful():
         """Kiểm tra đăng nhập thành công"""
@@ -669,7 +676,7 @@ def fill_login_info(driver, username, password, max_wait_time=240):  # 4 phút t
                 # async_save_data(username, last_captcha, driver)
                 if last_captcha['text'] and last_captcha['image']:
                     save_captcha_and_label(last_captcha['image'], last_captcha['text'])
-                save_cookies(driver, username)
+                # save_cookies(driver, username)
                 return True
 
             # Kiểm tra URL hiện tại
@@ -716,67 +723,73 @@ def save_captcha_and_label(image_data, captcha_text):
         print(f"Lỗi khi lưu captcha và label: {e}")
         return False
 
-def initialize_chrome():
+def initialize_chrome(max_retries=3):
     """Khởi tạo Chrome và mở trang web"""
-    try:
-        print("Đang khởi tạo Chrome driver...")
-
-        # Xác định đường dẫn profile mặc định của Chrome
-        if platform.system() == 'Windows':
-            default_profile = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
-        else:  # macOS
-            default_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
-
-        # Xác định đường dẫn Chrome
-        if platform.system() == 'Windows':
-            chrome_path = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-            if not os.path.exists(chrome_path):
-                chrome_path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
-        else:  # macOS
-            chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-
-        # Kiểm tra xem Chrome có đang chạy với debug port không
-        chrome_running = False
+    for attempt in range(max_retries):
         try:
-            response = requests.get('http://127.0.0.1:9222/json/version')
-            if response.status_code == 200:
-                chrome_running = True
-        except:
-            print("Khởi động Chrome mới với debug port...")
+            print(f"Đang khởi tạo Chrome driver... (lần thử {attempt + 1}/{max_retries})")
 
-        if not chrome_running:
-            # Khởi động Chrome mới mà không cần tắt các instance hiện tại
-            subprocess.Popen([
-                chrome_path,
-                f'--user-data-dir={default_profile}',
-                '--remote-debugging-port=9222',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--start-maximized',
-                '--disable-gpu',
-                '--disable-dev-shm-usage',
-            ])
-            time.sleep(3)  # Đợi Chrome khởi động
+            # Xác định đường dẫn profile mặc định của Chrome
+            if platform.system() == 'Windows':
+                default_profile = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
+            else:  # macOS
+                default_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
 
-        # Kết nối với Chrome debug port
-        chrome_options = Options()
-        chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
+            # Xác định đường dẫn Chrome
+            if platform.system() == 'Windows':
+                chrome_path = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+                if not os.path.exists(chrome_path):
+                    chrome_path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+            else:  # macOS
+                chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
-        service = Service(ChromeDriverManager().install())
+            # Kill tất cả các process Chrome debug hiện tại
+            if platform.system() == 'Windows':
+                os.system('taskkill /f /im "chrome.exe" >nul 2>&1')
+            else:
+                os.system('pkill -f "Chrome.*--remote-debugging-port=9222" >/dev/null 2>&1')
 
-        try:
-            driver = webdriver.Chrome(service=service, options=chrome_options)
-            print("Đã kết nối với Chrome thành công")
-            return driver
+            time.sleep(2)  # Đợi process được kill hoàn toàn
+
+            # Khởi động Chrome mới
+            chrome_options = Options()
+            chrome_options.add_argument(f'--user-data-dir={default_profile}')
+            chrome_options.add_argument('--remote-debugging-port=9222')
+            chrome_options.add_argument('--no-first-run')
+            chrome_options.add_argument('--no-default-browser-check')
+            chrome_options.add_argument('--start-maximized')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--no-sandbox')
+
+            # Thêm một số options để tăng độ ổn định
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-popup-blocking')
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+
+            service = Service(ChromeDriverManager().install())
+
+            try:
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+                print("Đã kết nối với Chrome thành công")
+                return driver
+            except Exception as e:
+                print(f"Lỗi khi kết nối với Chrome (lần {attempt + 1}): {str(e)}")
+                if attempt == max_retries - 1:  # Nếu là lần thử cuối
+                    print("Đã hết số lần thử kết nối với Chrome")
+                    return None
+                time.sleep(3)  # Đợi trước khi thử lại
+                continue
+
         except Exception as e:
-            error_message = f"Lỗi khi kết nối với Chrome: {str(e)}"
-            print(error_message)
-            return None
+            print(f"Lỗi khi khởi tạo Chrome (lần {attempt + 1}): {str(e)}")
+            if attempt == max_retries - 1:  # Nếu là lần thử cuối
+                print("Đã hết số lần thử khởi tạo Chrome")
+                return None
+            time.sleep(3)  # Đợi trước khi thử lại
+            continue
 
-    except Exception as e:
-        error_message = f"Lỗi khi khởi tạo Chrome: {str(e)}"
-        print(error_message)
-        return None
+    return None
 
 def save_cookies(driver, username):
     """Lưu cookies cho username"""
@@ -831,8 +844,6 @@ def clear_all_cookies_and_sessions(driver):
     except Exception as e:
         print(f"Lỗi khi xóa cookies và sessions: {str(e)}")
         return False
-
-
 
 def is_table_loaded_with_data(driver, short_wait):
     """
@@ -1227,3 +1238,75 @@ def process_matched_results(driver, matched_results, cached_extracted_files):
             success_count += 1
 
     return success_count, drive_upload_results
+
+def handle_login_process(driver, tax_number):
+    """
+    Xử lý quá trình đăng nhập với MST cho trước
+
+    Args:
+        driver: WebDriver instance
+        tax_number: Mã số thuế dùng để đăng nhập
+
+    Returns:
+        bool: True nếu đăng nhập thành công, False nếu thất bại
+
+    Raises:
+        Exception: Nếu không thể đăng nhập sau khi thử
+    """
+    # Khởi tạo WebDriverWait với timeout dài hơn
+    long_wait = WebDriverWait(driver, 120)  # 2 phút
+    short_wait = WebDriverWait(driver, 2)   # 2 giây
+
+    def is_page_loaded():
+        try:
+            return driver.execute_script("return document.readyState") == "complete"
+        except:
+            return False
+
+    def wait_for_page_load(url, timeout=120):
+        start_time = time.time()
+        driver.get(url)
+
+        while time.time() - start_time < timeout:
+            try:
+                if is_page_loaded():
+                    # Thêm delay ngắn để đảm bảo JS đã chạy
+                    time.sleep(0.5)
+                    return True
+            except:
+                pass
+            time.sleep(0.5)
+        return False
+
+    # Kiểm tra URL hiện tại
+    current_url = driver.current_url
+    is_login_page = "dang-nhap" in current_url
+    is_blank_page = current_url in ["about:blank", "chrome://newtab/"]
+
+    # Chỉ mở tab mới nếu không phải trang login hoặc trang trống
+    if not (is_login_page or is_blank_page):
+        driver.execute_script("window.open('about:blank', '_blank');")
+        driver.switch_to.window(driver.window_handles[-1])
+
+    # Login process
+    login_success = False
+
+    # cookies_loaded = load_cookies(driver, tax_number)
+    # if cookies_loaded:
+    #     if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/Home"):
+    #         try:
+    #             long_wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
+    #             login_success = "dang-nhap" not in driver.current_url
+    #         except:
+    #             print("Timeout khi đợi trang Home load hoàn tất")
+
+    if not login_success:
+        if wait_for_page_load("http://thuphi.haiphong.gov.vn:8222/dang-nhap"):
+            long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
+            if fill_login_info(driver, tax_number, tax_number):
+                login_success = True
+
+    if not login_success:
+        raise Exception(f"Không thể đăng nhập với MST {tax_number}")
+
+    return login_success

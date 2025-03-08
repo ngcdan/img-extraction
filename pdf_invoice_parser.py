@@ -78,10 +78,36 @@ def extract_header_info(lines):
             if mau_so_index + 1 < len(lines) and lines[mau_so_index + 1].startswith("Số:"):
                 result['so_ct'] = lines[mau_so_index + 1].replace("Số:", "").strip()
 
+        # Tạo các biến thể của từ "công ty"
+        company_variants = [
+            "công ty", "Công ty", "CÔNG TY",  # Có dấu chuẩn
+            "CôNG TY", "CÔng ty", "Công Ty",  # Có dấu mix case
+            "cong ty", "Cong ty", "CONG TY",  # Không dấu
+            "CTY", "Cty", "cty", "C.ty",      # Viết tắt
+            "cty tnhh", "CTY TNHH",           # Dạng pháp lý
+            "công ty tnhh", "CÔNG TY TNHH"    # Dạng đầy đủ
+        ]
+
+        def normalize_text(text):
+            """Chuẩn hóa text để so sánh"""
+            import unicodedata
+            # Chuyển về chữ thường và bỏ dấu
+            text = text.lower()
+            text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
+            # Bỏ các ký tự đặc biệt
+            text = ''.join(c for c in text if c.isalnum() or c.isspace())
+            return text
+
         for i, line in enumerate(lines):
             if line == "Kính gửi:":
-                if i + 1 < len(lines):
-                    result['partner_invoice_name'] = lines[i + 1].strip()
+                # Tìm trong 3 dòng tiếp theo
+                for j in range(i + 1, min(i + 4, len(lines))):
+                    current_line = lines[j].strip()
+                    normalized_line = normalize_text(current_line)
+                    # Kiểm tra với các biến thể đã được normalize
+                    if any(normalize_text(variant) in normalized_line for variant in company_variants):
+                        result['partner_invoice_name'] = current_line  # Lưu text gốc
+                        break
                 break
 
         for i, line in enumerate(lines):
@@ -234,6 +260,7 @@ def process_pdf(pdf_path):
         return None
 
 def main():
+
     pdf_path = "data/1.pdf"
     sections = extract_text_from_pdf(pdf_path)
     if not sections:
@@ -242,11 +269,8 @@ def main():
     print(json.dumps(sections['header'], indent=2, ensure_ascii=False))
 
     result = extract_header_info(sections['header'])
+    print("Kết quả xử lý:\n")
     print(json.dumps(result, indent=2, ensure_ascii=False))
-    if not result:
-        return None
-
-    print("Kết quả xử lý:", result)
 
 if __name__ == "__main__":
     main()

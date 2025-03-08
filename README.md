@@ -102,7 +102,7 @@ project/
 ├── app.py                    # Entry point
 ├── utils.py                  # Utility functions
 ├── receipt_fetcher.py        # PDF download logic
-├── extract_info.py           # PDF processing
+├── pdf_invoice_parser.py           # PDF processing
 ├── requirements.txt          # Dependencies
 ├── .env                      # Environment variables
 ├── .gitignore               # Git ignore rules

@@ -1,4 +1,7 @@
 
+# Chrome profiles
+chrome_profiles/
+
 # Environment variables
 .env
 .env.local

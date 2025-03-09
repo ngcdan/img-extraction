@@ -73,8 +73,8 @@ class ChromeManager:
                     "credentials_enable_service": False,
                     "profile.password_manager_enabled": False,
                     "profile.default_content_setting_values.notifications": 2,
-                    # "profile.managed_default_content_settings.images": 2,  # Tắt load hình ảnh
-                    "profile.default_content_settings.cookies": 1,
+                    # "profile.managed_default_content_settings.images": 1,
+                    # "profile.default_content_settings.cookies": 1,
                     # "profile.managed_default_content_settings.javascript": 1,
                     # "profile.default_content_settings.plugins": 1,
                     # "disk-cache-size": 4096
@@ -88,15 +88,15 @@ class ChromeManager:
                     "userAgent": 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
                 })
 
-                # Thiết lập kích thước cửa sổ iPhone 14 Pro Max
-                driver.set_window_size(430, 932)
+                # Thiết lập kích thước cửa sổ iPhone 14 Pro
+                driver.set_window_size(430, 912)
 
                 # Lấy kích thước màn hình
                 screen_width = driver.execute_script('return window.screen.width')
 
                 # Đặt vị trí cửa sổ ở góc trên bên phải
-                # Trừ đi 430 (chiều rộng cửa sổ) + 10px padding để đảm bảo cửa sổ nằm hoàn toàn trong màn hình
-                driver.set_window_position(screen_width - 430 - 10, 10)  # padding 10px từ cạnh phải và trên
+                # Trừ đi 430 (chiều rộng cửa sổ) + 20px padding để đảm bảo cửa sổ nằm hoàn toàn trong màn hình
+                driver.set_window_position(screen_width - 430 - 20, 20)  # padding 20px từ cạnh phải và trên
 
                 print("Đã kết nối với Chrome thành công")
                 return driver

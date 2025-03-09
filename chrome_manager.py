@@ -25,11 +25,6 @@ class ChromeManager:
             try:
                 print(f"Đang khởi tạo Chrome driver... (lần thử {attempt + 1}/{max_retries})")
 
-                # Tạo thư mục profile tạm thời
-                # temp_profile = os.path.join(os.getcwd(), 'chrome_profile')
-                # if not os.path.exists(temp_profile):
-                #     os.makedirs(temp_profile)
-
                 # Xác định đường dẫn profile mặc định của Chrome
                 if platform.system() == 'Windows':
                     default_profile = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
@@ -50,8 +45,6 @@ class ChromeManager:
 
                 # Thiết lập options cho Chrome
                 chrome_options = webdriver.ChromeOptions()
-                # chrome_options.add_argument(f'--user-data-dir={temp_profile}')
-                # chrome_options.add_argument('--profile-directory=Default')
                 chrome_options.add_argument(f'--user-data-dir={default_profile}')
                 chrome_options.add_argument('--remote-debugging-port=9222')
                 chrome_options.add_argument('--no-first-run')
@@ -63,8 +56,14 @@ class ChromeManager:
                 chrome_options.add_argument('--disable-extensions')
                 chrome_options.add_argument('--disable-popup-blocking')
                 chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-                chrome_options.add_argument('--disable-save-password-bubble')  # Tắt popup lưu password
-                chrome_options.add_argument('--disable-notifications')  # Tắt tất cả các notifications
+                chrome_options.add_argument('--disable-save-password-bubble')
+                chrome_options.add_argument('--disable-notifications')
+                chrome_options.add_argument('--disable-background-networking')
+                chrome_options.add_argument('--disable-background-timer-throttling')
+                chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+                chrome_options.add_argument('--disable-breakpad')
+                chrome_options.add_argument('--disable-component-extensions-with-background-pages')
+                chrome_options.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees')
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
 
@@ -73,11 +72,10 @@ class ChromeManager:
                     "credentials_enable_service": False,
                     "profile.password_manager_enabled": False,
                     "profile.default_content_setting_values.notifications": 2,
-                    # "profile.managed_default_content_settings.images": 1,
-                    # "profile.default_content_settings.cookies": 1,
-                    # "profile.managed_default_content_settings.javascript": 1,
-                    # "profile.default_content_settings.plugins": 1,
-                    # "disk-cache-size": 4096
+                    "browser.enable_automation": False,
+                    "browser.show_home_button": False,
+                    "browser.startup.homepage": "about:blank",
+                    "browser.startup.page": 0
                 }
                 chrome_options.add_experimental_option("prefs", prefs)
 
@@ -91,12 +89,12 @@ class ChromeManager:
                 # Thiết lập kích thước cửa sổ iPhone 14 Pro
                 driver.set_window_size(430, 912)
 
-                # Lấy kích thước màn hình
+                # Lấy kích thước màn hình và đặt vị trí cửa sổ
                 screen_width = driver.execute_script('return window.screen.width')
+                driver.set_window_position(screen_width - 430 - 20, 20)
 
-                # Đặt vị trí cửa sổ ở góc trên bên phải
-                # Trừ đi 430 (chiều rộng cửa sổ) + 20px padding để đảm bảo cửa sổ nằm hoàn toàn trong màn hình
-                driver.set_window_position(screen_width - 430 - 20, 20)  # padding 20px từ cạnh phải và trên
+                # Navigate to about:blank first to avoid new tab page
+                driver.get("about:blank")
 
                 print("Đã kết nối với Chrome thành công")
                 return driver

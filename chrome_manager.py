@@ -91,7 +91,7 @@ class ChromeManager:
 
                 # Lấy kích thước màn hình và đặt vị trí cửa sổ
                 screen_width = driver.execute_script('return window.screen.width')
-                driver.set_window_position(screen_width - 430 - 20, 20)
+                driver.set_window_position(screen_width - 430 - 100, 40)  # Cách lề phải và trên 40px
 
                 # Navigate to about:blank first to avoid new tab page
                 driver.get("about:blank")

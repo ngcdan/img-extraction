@@ -627,6 +627,7 @@ def process_and_upload_invoice(invoice_info, pdf_data, cached_extracted_files, d
                         # Lấy phần text trước pattern và xử lý
                         prefix = source_file[:source_file.index(p)].strip()
                         prefix = prefix.replace(' ', '_')
+                        prefix = prefix.replace('-', '_').replace(' ', '_')
                         break
 
                 if prefix:

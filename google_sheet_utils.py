@@ -15,7 +15,7 @@ SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
 HEADER_ROW = [
     'ServiceCode', 'VendorName', 'JobNo', 'HBLNo', 'CustomNo',
     'ChargeCode', 'Description', 'Quantity', 'Unit', 'Amount', 'VAT',
-    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate', 'Note', 'PartnerInvoiceName'
+    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate', 'Note', 'PartnerID_Inv', 'PartnerInvoiceName'
 ]
 
 class SheetService:
@@ -213,8 +213,8 @@ class SheetService:
                         'range': {
                             'sheetId': new_sheet_id,
                             'dimension': 'COLUMNS',
-                            'startIndex': 17,
-                            'endIndex': 18
+                            'startIndex': 18,
+                            'endIndex': 19
                         },
                         'properties': {
                             'pixelSize': 300

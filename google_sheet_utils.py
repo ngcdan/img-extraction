@@ -13,9 +13,9 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE_ACCOUNT_FILE = 'service-account-key.json'
 SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
 HEADER_ROW = [
-    'PartnerID', 'PartnerName', 'JobNo', 'HBLNo', 'Custom No',
-    'FeeCode', 'FeeName', 'Quantity', 'Unit', 'Amount', 'VAT',
-    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate',  'PartnerID_Inv', 'PartnerName_Inv'
+    'ServiceCode', 'VendorName', 'JobNo', 'HBLNo', 'CustomNo',
+    'ChargeCode', 'Description', 'Quantity', 'Unit', 'Amount', 'VAT',
+    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate', 'Note', 'PartnerInvoiceName'
 ]
 
 class SheetService:
@@ -163,11 +163,12 @@ class SheetService:
                             'userEnteredFormat': {
                                 'backgroundColor': {
                                     'red': 1.0,
-                                    'green': 0.427,  # 109/255
-                                    'blue': 0.004,   # 1/255
+                                    'green': 0.427,
+                                    'blue': 0.004,
                                 },
                                 'textFormat': {
-                                    'bold': True
+                                    'bold': True,
+                                    'fontSize': 11
                                 },
                                 'verticalAlignment': 'MIDDLE',
                                 'horizontalAlignment': 'CENTER'
@@ -176,29 +177,14 @@ class SheetService:
                         'fields': 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment)'
                     }
                 },
-                # Điều chỉnh độ rộng cột cho PartnerName (index 3)
+                # Điều chỉnh độ rộng cột cho VendorName (index 1)
                 {
                     'updateDimensionProperties': {
                         'range': {
                             'sheetId': new_sheet_id,
                             'dimension': 'COLUMNS',
-                            'startIndex': 3,
-                            'endIndex': 4
-                        },
-                        'properties': {
-                            'pixelSize': 300  # Độ rộng mặc định * 3
-                        },
-                        'fields': 'pixelSize'
-                    }
-                },
-                # Điều chỉnh độ rộng cột cho FeeName (index 8)
-                {
-                    'updateDimensionProperties': {
-                        'range': {
-                            'sheetId': new_sheet_id,
-                            'dimension': 'COLUMNS',
-                            'startIndex': 8,
-                            'endIndex': 9
+                            'startIndex': 1,
+                            'endIndex': 2
                         },
                         'properties': {
                             'pixelSize': 300
@@ -206,14 +192,29 @@ class SheetService:
                         'fields': 'pixelSize'
                     }
                 },
-                # Điều chỉnh độ rộng cột cho PartnerName_Inv (index 19)
+                # Điều chỉnh độ rộng cột cho Description (index 6)
                 {
                     'updateDimensionProperties': {
                         'range': {
                             'sheetId': new_sheet_id,
                             'dimension': 'COLUMNS',
-                            'startIndex': 19,
-                            'endIndex': 20
+                            'startIndex': 6,
+                            'endIndex': 7
+                        },
+                        'properties': {
+                            'pixelSize': 300
+                        },
+                        'fields': 'pixelSize'
+                    }
+                },
+                # Điều chỉnh độ rộng cột cho PartnerInvoiceName (index 17)
+                {
+                    'updateDimensionProperties': {
+                        'range': {
+                            'sheetId': new_sheet_id,
+                            'dimension': 'COLUMNS',
+                            'startIndex': 17,
+                            'endIndex': 18
                         },
                         'properties': {
                             'pixelSize': 300

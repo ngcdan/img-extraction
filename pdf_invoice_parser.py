@@ -269,9 +269,9 @@ def main():
     if not sections:
         return None
 
-    print(json.dumps(sections['header'], indent=2, ensure_ascii=False))
+    print(json.dumps(sections, indent=2, ensure_ascii=False))
 
-    result = extract_header_info(sections['header'])
+    result = extract_header_info(sections['table'])
     print("Kết quả xử lý:\n")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 

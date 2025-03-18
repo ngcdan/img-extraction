@@ -13,9 +13,9 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE_ACCOUNT_FILE = 'service-account-key.json'
 SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
 HEADER_ROW = [
-    'STT', 'Số chứng từ', 'PartnerID', 'PartnerName', 'JobNo', 'HBLNo', 'Custom No',
+    'PartnerID', 'PartnerName', 'JobNo', 'HBLNo', 'Custom No',
     'FeeCode', 'FeeName', 'Quantity', 'Unit', 'Amount', 'VAT',
-    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate', 'Partner TaxNo', 'PartnerName_Inv', 'PartnerID_Inv'
+    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate',  'PartnerID_Inv', 'PartnerName_Inv'
 ]
 
 class SheetService:
@@ -290,7 +290,7 @@ def append_to_google_sheet_new(extracted_info):
             'vendor': 'SO GTVT- SO GIAO THONG VAN TAI',
             'charge_code': 'B_CSHT',
             'description': 'INFRASTRUCTURE FEES',
-            'unit': 'container'
+            'unit': 'shipment'
         }
 
         # Lấy số dòng hiện tại của sheet cụ thể
@@ -306,8 +306,6 @@ def append_to_google_sheet_new(extracted_info):
 
         values = []
         row_data = [
-            current_row,  # STT
-            f"'{extracted_info.get('so_ct', '')}'",  # Số chứng từ - thêm dấu nháy để giữ số 0
             fixed_data['service_code'],
             fixed_data['vendor'],
             extracted_info.get('jobId', ''),
@@ -321,12 +319,11 @@ def append_to_google_sheet_new(extracted_info):
             '', # tax
             extracted_info.get('total_amount', ''),
             extracted_info.get('tax_number', '') != '0303482440',
-            f"'{extracted_info.get('invoice_no', '')}'",  # Số hóa đơn - thêm dấu nháy để giữ số 0
+            f"'{extracted_info.get('invoice_no', '').zfill(8)}",  # Số hóa đơn - thêm số 0 ở đầu cho đủ 8 số
             extracted_info.get('seriesNo', ''),
             extracted_info.get('ngay', ''),
-            f"'{extracted_info.get('tax_number', '')}'",  # Mã số thuế - thêm dấu nháy để giữ số 0
+            '',
             extracted_info.get('partner_invoice_name'),
-            ''
         ]
         values.append(row_data)
 

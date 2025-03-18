@@ -598,8 +598,10 @@ def process_and_upload_invoice(invoice_info, pdf_data, cached_extracted_files, d
     Upload PDF lên drive và append vào sheet, sau đó di chuyển file đã xử lý vào thư mục success
     """
     try:
+        customs_no = invoice_info.get('custom_no')
+
         ngay_formatted = invoice_info['ngay'].replace('/', '') if invoice_info.get('ngay') else datetime.now().strftime('%d%m%Y')
-        filename = f"CSHT_{invoice_info['invoice_no']}.pdf"
+
 
         drive_instance = DriveService.get_instance()
         service = drive_instance.service
@@ -609,44 +611,42 @@ def process_and_upload_invoice(invoice_info, pdf_data, cached_extracted_files, d
         if not date_folder_id:
             raise Exception("Không thể tạo/tìm folder ngày")
 
-        file_exists, existing_file_id = check_file_exists(service, date_folder_id, filename)
-
-        if file_exists:
-            print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
-            upload_result = {
-                'success': True,
-                'file_id': existing_file_id,
-                'file_path': f"{ngay_formatted}/{filename}",
-                'already_exists': True
-            }
-        else:
-            upload_result = upload_file_to_drive(
-                file_content=pdf_data,
-                filename=filename,
-                parent_folder_date=ngay_formatted
-            )
+        filename = f"CSHT_{invoice_info['invoice_no']}.pdf"
+        pattern = ['BEHPH', 'BLHPH', 'BIHPH', 'BEHAN', 'BLHAN', 'BIHAN', 'BLDAD', 'BEDAD', 'BIDAD', 'BEHCM', 'BLHCM', 'BIHCM']
 
         # Upload related customs file if exists
-        customs_no = invoice_info.get('custom_no')
         if customs_no and customs_no in cached_extracted_files:
             try:
                 cached_data = cached_extracted_files[customs_no]
+                source_file = cached_data['header_info']['source_file']
+
+                # Xử lý source_file để tạo prefix cho filename
+                prefix = None
+                for p in pattern:
+                    if p in source_file:
+                        # Lấy phần text trước pattern và xử lý
+                        prefix = source_file[:source_file.index(p)].strip()
+                        prefix = prefix.replace(' ', '_')
+                        break
+
+                if prefix:
+                    filename = f"{prefix}_{filename}"
+
                 customs_upload_result = upload_file_to_drive(
                     file_content=cached_data['file_content'],
-                    filename=cached_data['header_info']['source_file'],
+                    filename=source_file,
                     parent_folder_date=ngay_formatted
                 )
 
                 if customs_upload_result['success']:
                     cached_data['header_info']['drive_file_path'] = customs_upload_result['file_path']
                     drive_upload_results.append({
-                        'file': cached_data['header_info']['source_file'],
+                        'file': source_file,
                         'status': 'success',
                         'path': customs_upload_result['file_path']
                     })
 
                     # Move file to customs_success folder after successful upload
-                    source_file = cached_data['header_info']['source_file']
                     source_path = os.path.join(get_default_customs_dir(), source_file)
                     success_dir = os.path.join(get_default_customs_dir(), 'customs_success')
 
@@ -673,6 +673,23 @@ def process_and_upload_invoice(invoice_info, pdf_data, cached_extracted_files, d
                     })
             except Exception as e:
                 print(f"Lỗi upload file cho customs_no {customs_no}: {str(e)}")
+
+        file_exists, existing_file_id = check_file_exists(service, date_folder_id, filename)
+
+        if file_exists:
+            print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
+            upload_result = {
+                'success': True,
+                'file_id': existing_file_id,
+                'file_path': f"{ngay_formatted}/{filename}",
+                'already_exists': True
+            }
+        else:
+            upload_result = upload_file_to_drive(
+                file_content=pdf_data,
+                filename=filename,
+                parent_folder_date=ngay_formatted
+            )
 
         if upload_result['success']:
             if append_to_google_sheet_new(invoice_info):

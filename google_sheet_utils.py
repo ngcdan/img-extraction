@@ -13,9 +13,9 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SERVICE_ACCOUNT_FILE = 'service-account-key.json'
 SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
 HEADER_ROW = [
-    'ServiceCode', 'VendorName', 'JobNo', 'HBLNo', 'CustomNo',
-    'ChargeCode', 'Description', 'Quantity', 'Unit', 'Amount', 'VAT',
-    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate', 'Note', 'PartnerID_Inv', 'PartnerInvoiceName'
+    'PartnerID', 'PartnerName', 'JobNo', 'HBLNo', 'Custom No',
+    'FeeCode', 'FeeName', 'Quantity', 'Unit', 'Amount', 'VAT',
+    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate',  'PartnerID_Inv', 'PartnerName_Inv'
 ]
 
 class SheetService:

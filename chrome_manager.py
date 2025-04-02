@@ -156,7 +156,7 @@ class ChromeManager:
         """Điền thông tin đăng nhập và đợi user login thành công"""
         wait = WebDriverWait(driver, 10)
         start_time = time.time()
-        last_captcha = {'text': None, 'image': None}
+        # last_captcha = {'text': None, 'image': None}  # Comment lại biến lưu captcha
 
         def is_login_successful() -> bool:
             """Kiểm tra đăng nhập thành công"""
@@ -171,13 +171,13 @@ class ChromeManager:
             except:
                 return False
 
-        def get_current_captcha() -> Optional[str]:
-            """Lấy giá trị captcha hiện tại"""
-            try:
-                captcha_input = driver.find_element(By.ID, "CaptchaInputText")
-                return captcha_input.get_attribute('value')
-            except:
-                return None
+        # def get_current_captcha() -> Optional[str]:  # Comment lại hàm lấy captcha
+        #     """Lấy giá trị captcha hiện tại"""
+        #     try:
+        #         captcha_input = driver.find_element(By.ID, "CaptchaInputText")
+        #         return captcha_input.get_attribute('value')
+        #     except:
+        #         return None
 
         def fill_form() -> bool:
             """Điền thông tin form"""
@@ -190,18 +190,18 @@ class ChromeManager:
                 password_input.clear()
                 password_input.send_keys(password)
 
-                try:
-                    captcha_input = driver.find_element(By.ID, "CaptchaInputText")
-                    captcha_input.click()
-                except:
-                    pass
+                # try:  # Comment lại phần click vào ô captcha
+                #     captcha_input = driver.find_element(By.ID, "CaptchaInputText")
+                #     captcha_input.click()
+                # except:
+                #     pass
 
                 return True
             except Exception as e:
                 print(f"Lỗi khi điền form: {str(e)}")
                 return False
 
-        # Thêm script theo dõi captcha
+        # Comment lại toàn bộ phần script theo dõi captcha
         js_script = """
         window.captchaValue = '';
         window.lastSubmittedCaptcha = '';
@@ -245,30 +245,32 @@ class ChromeManager:
         # Loop kiểm tra liên tục
         while time.time() - start_time < max_wait_time:
             try:
-                current_captcha = get_current_captcha()
-                if (current_captcha and
-                    len(current_captcha) >= 5 and
-                    current_captcha != last_captcha.get('text')):
-                    try:
-                        captcha_element = driver.find_element(By.ID, "CaptchaImage")
-                        last_captcha = {
-                            'text': current_captcha,
-                            'image': captcha_element.screenshot_as_png
-                        }
-                        try:
-                            submit_btn = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-                            if submit_btn and submit_btn.is_enabled():
-                                driver.execute_script("arguments[0].click();", submit_btn)
-                        except:
-                            pass
+                # Comment lại phần xử lý captcha
+                # current_captcha = get_current_captcha()
+                # if (current_captcha and
+                #     len(current_captcha) >= 5 and
+                #     current_captcha != last_captcha.get('text')):
+                #     try:
+                #         captcha_element = driver.find_element(By.ID, "CaptchaImage")
+                #         last_captcha = {
+                #             'text': current_captcha,
+                #             'image': captcha_element.screenshot_as_png
+                #         }
+                #         try:
+                #             submit_btn = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+                #             if submit_btn and submit_btn.is_enabled():
+                #                 driver.execute_script("arguments[0].click();", submit_btn)
+                #         except:
+                #             pass
 
-                    except:
-                        pass
+                #     except:
+                #         pass
 
                 if is_login_successful():
-                    if last_captcha['text'] and last_captcha['image']:
-                        ChromeManager.save_captcha_and_label(last_captcha['image'], last_captcha['text'])
-                    CookieManager.save_cookies(driver, username)
+                    # Comment lại phần lưu captcha
+                    # if last_captcha['text'] and last_captcha['image']:
+                    #     ChromeManager.save_captcha_and_label(last_captcha['image'], last_captcha['text'])
+                    # CookieManager.save_cookies(driver, username)
                     return True
 
                 if "dang-nhap" in driver.current_url:
@@ -307,3 +309,49 @@ class ChromeManager:
         except Exception as e:
             print(f"Lỗi khi lưu captcha và label: {e}")
             return False
+
+    @staticmethod
+    def wait_for_search_complete(driver: webdriver.Chrome, timeout: int = 30) -> bool:
+        """Chờ cho kết quả tìm kiếm hoàn tất và bảng dữ liệu được load
+
+        Args:
+            driver: WebDriver instance
+            timeout: Thời gian chờ tối đa (giây)
+
+        Returns:
+            bool: True nếu tìm kiếm hoàn tất, False nếu timeout
+        """
+        def is_search_complete() -> bool:
+            try:
+                # Kiểm tra preloader đã biến mất
+                if driver.find_elements(By.CLASS_NAME, "preloader-container"):
+                    return False
+
+                # Kiểm tra bảng dữ liệu
+                table = driver.find_element(By.ID, "TBLDANHSACH")
+                if not table:
+                    return False
+
+                # Kiểm tra số lượng rows hoặc thông báo không có dữ liệu
+                rows = table.find_elements(By.TAG_NAME, "tr")
+                if len(rows) > 1:  # Có ít nhất 1 row dữ liệu (không tính header)
+                    return True
+
+                # Kiểm tra thông báo "không có dữ liệu"
+                empty_messages = driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty")
+                if empty_messages and any(msg.is_displayed() for msg in empty_messages):
+                    return True
+
+                return False
+
+            except Exception:
+                return False
+
+        # Sử dụng WebDriverWait để tối ưu việc chờ đợi
+        try:
+            short_wait = WebDriverWait(driver, timeout)
+            short_wait.until(lambda d: is_search_complete())
+            return True
+        except TimeoutException:
+            return False
+

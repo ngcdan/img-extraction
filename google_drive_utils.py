@@ -463,3 +463,57 @@ def append_to_labels_file(filename, label):
             'success': False,
             'error': error_msg
         }
+
+def batch_upload_to_drive(files_to_upload):
+    """
+    Upload nhiều files lên Drive cùng lúc
+    """
+    results = []
+    drive_instance = DriveService.get_instance()
+    service = drive_instance.service
+    root_id = drive_instance.get_root_folder_id('CUSTOMS')
+
+    # Cache folder IDs to avoid repeated API calls
+    folder_cache = {}
+
+    for file_info in files_to_upload:
+        try:
+            date_folder = file_info['date_folder']
+
+            # Get folder ID from cache or create new
+            if date_folder not in folder_cache:
+                folder_id = get_or_create_folder(service, root_id, date_folder)
+                folder_cache[date_folder] = folder_id
+
+            file_metadata = {
+                'name': file_info['filename'],
+                'parents': [folder_cache[date_folder]]
+            }
+
+            media = MediaIoBaseUpload(
+                io.BytesIO(file_info['content']),
+                mimetype='application/pdf',
+                resumable=True
+            )
+
+            file = service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id'
+            ).execute()
+
+            results.append({
+                'invoice_no': file_info['invoice_no'],
+                'file_id': file.get('id'),
+                'success': True
+            })
+
+        except Exception as e:
+            print(f"Lỗi upload file {file_info['filename']}: {str(e)}")
+            results.append({
+                'invoice_no': file_info['invoice_no'],
+                'error': str(e),
+                'success': False
+            })
+
+    return results

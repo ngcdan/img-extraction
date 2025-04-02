@@ -1,3 +1,4 @@
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -7,7 +8,10 @@ from selenium.webdriver.chrome.options import Options
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+import pyodbc
 
+import json
+import random
 import platform
 import requests
 import subprocess
@@ -33,10 +37,10 @@ from google_drive_utils import (
     DriveService,
     get_or_create_folder,
     check_file_exists,
-    append_to_labels_file
+    append_to_labels_file, batch_upload_to_drive
 )
 
-from google_sheet_utils import append_to_google_sheet_new
+from google_sheet_utils import append_to_google_sheet_new, batch_append_to_sheet
 
 from pdf_invoice_parser import (
     extract_text_from_pdf,
@@ -101,61 +105,6 @@ def extract_files_info(files: List[str]) -> Tuple[List[Dict], Dict]:
 
     return extracted_results, cached_extracted_files
 
-def group_results_by_tax_number(extracted_results: List[Dict]) -> Dict[str, List[Dict]]:
-    """
-    Nhóm kết quả theo tax_number và customs_number
-
-    Args:
-        extracted_results: Danh sách kết quả đã trích xuất
-
-    Returns:
-        Dict[str, List[Dict]]: Kết quả đã nhóm theo tax_number
-    """
-    grouped_results = {}
-
-    for result in sorted(extracted_results, key=lambda x: x.get('tax_number', '0')):
-        tax_number = result.get('tax_number')
-        customs_number = result.get('customs_number')
-        date_str = result.get('date')
-
-        if not all([tax_number, customs_number, date_str]):
-            continue
-
-        if tax_number not in grouped_results:
-            grouped_results[tax_number] = []
-
-        current_date = parse_date(date_str)
-        if not current_date:
-            print(f"Warning: Invalid date format for {date_str}")
-            continue
-
-        existing_customs = next(
-            (item for item in grouped_results[tax_number]
-             if item['customs_number'] == customs_number),
-            None
-        )
-
-        if existing_customs:
-            existing_min_date = parse_date(existing_customs['min_date'])
-            existing_max_date = parse_date(existing_customs['max_date'])
-
-            current_min_date = current_date - timedelta(days=7)
-            current_max_date = current_date + timedelta(days=7)
-
-            if current_min_date < existing_min_date:
-                existing_customs['min_date'] = format_date(current_min_date)
-            if current_max_date > existing_max_date:
-                existing_customs['max_date'] = format_date(current_max_date)
-
-            existing_customs['date'] = result['date']
-        else:
-            new_entry = result.copy()
-            new_entry['min_date'] = format_date(current_date - timedelta(days=7))
-            new_entry['max_date'] = format_date(current_date + timedelta(days=7))
-            grouped_results[tax_number].append(new_entry)
-
-    return grouped_results
-
 def batch_process_files(files: List[str]) -> Dict[str, Any]:
     """
     Xử lý nhiều file PDF cùng lúc
@@ -176,351 +125,267 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         download_results = []
         # 1. Trích xuất thông tin từ files
         extracted_results, cached_extracted_files = extract_files_info(files)
-        # 2. Nhóm kết quả theo tax_number
-        grouped_results = group_results_by_tax_number(extracted_results)
-        # 3. Thực hiện download và write dữ liệu
-        for tax_number, customs_numbers in grouped_results.items():
-            session = requests.Session()
-            session.verify = False
-            success_count = 0
 
-            try:
-                # Xử lý đăng nhập
-                if not handle_login_process(driver, tax_number):
-                    print(f"Không thể đăng nhập với MST {tax_number} - bỏ qua và chuyển sang MST tiếp theo")
-                    download_results.append({
-                        'tax_number': tax_number,
-                        'status': 'error',
-                        'customs_count': len(customs_numbers),
-                        'success_count': 0,
-                        'error': 'Lỗi đăng nhập'
-                    })
-                    continue
+        # Lấy tax_number từ kết quả đầu tiên
+        if not extracted_results:
+            raise ValueError("Không có dữ liệu được trích xuất")
 
-                # Truy cập trang tìm kiếm
-                if not ChromeManager.wait_for_page_load(driver, "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu"):
-                    raise Exception("Không thể truy cập trang tìm kiếm")
+        tax_number = extracted_results[0].get('tax_number')
+        if not tax_number:
+            raise ValueError("Không tìm thấy tax_number trong dữ liệu trích xuất")
 
-                # Tăng thời gian chờ tối đa lên 60 giây
-                wait = WebDriverWait(driver, 60)
-                short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
+        print(f"\nThực hiện đăng nhập với MST: {tax_number}")
 
-                try:
-                    preloader = short_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-                except:
-                    pass
+        # Thực hiện đăng nhập
+        login_success = handle_login_process(driver, tax_number)
+        if not login_success:
+            raise Exception(f"Không thể đăng nhập với MST {tax_number}")
 
-                start_time = time.time()
-                while time.time() - start_time < 60:  # Tối đa 60 giây
-                    if not driver.find_elements(By.CLASS_NAME, "preloader-container"):
-                        if ChromeManager.is_table_loaded_with_data(driver, short_wait):
-                            break
-                    time.sleep(0.5)  # Đợi 500ms trước khi check lại
+        # Truy cập trang tìm kiếm
+        if not ChromeManager.wait_for_page_load(driver, "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu"):
+            raise Exception("Không thể truy cập trang tìm kiếm")
 
-                if not ChromeManager.is_table_loaded_with_data(driver, short_wait):
-                    print(f"MST {tax_number}: Không thể load dữ liệu bảng sau 60 giây - bỏ qua")
-                    download_results.append({
-                        'tax_number': tax_number,
-                        'status': 'error',
-                        'customs_count': len(customs_numbers),
-                        'success_count': 0,
-                        'error': 'Timeout load bảng dữ liệu'
-                    })
-                    continue
+        # Tăng thời gian chờ tối đa lên 60 giây
+        wait = WebDriverWait(driver, 60)
+        short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
 
-                # get first customs
-                customs = customs_numbers[0]
+        print("\n=== Debug loading state ===")
+        print(f"Current URL: {driver.current_url}")
 
-                # Lấy ngày đầu tiên của tháng hiện tại
-                today = datetime.now()
-                first_day_of_month = today.replace(day=1)
-                min_date = parse_date(customs['min_date'])
+        # Chờ bảng dữ liệu load xong
+        try:
+            print("Checking for preloader...")
+            preloader = short_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
+            print("Found preloader element")
+        except:
+            print("No preloader found or already disappeared")
+            pass
 
-                # Kiểm tra nếu min_date bé hơn ngày đầu tháng
-                if min_date < first_day_of_month:
-                    # Điền form tìm kiếm
-                    try:
-                        tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
-                        tu_ngay_input.clear()
-                        tu_ngay_input.send_keys(customs['min_date'])
+        start_time = time.time()
+        iteration = 0
+        while time.time() - start_time < 60:  # Tối đa 60 giây
+            iteration += 1
+            print(f"\nIteration {iteration} - Time elapsed: {time.time() - start_time:.1f}s")
 
-                        den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
-                        den_ngay_input.clear()
-                        den_ngay_input.send_keys(customs['max_date'])
+            preloader_exists = driver.find_elements(By.CLASS_NAME, "preloader-container")
+            print(f"Preloader exists: {bool(preloader_exists)}")
 
-                    except Exception as e:
-                        print(f"MST {tax_number}: Lỗi khi điền form tìm kiếm: {str(e)} - bỏ qua")
-                        download_results.append({
-                            'tax_number': tax_number,
-                            'status': 'error',
-                            'customs_count': len(customs_numbers),
-                            'success_count': 0,
-                            'error': f'Lỗi điền form: {str(e)}'
-                        })
-                        continue
+            if not preloader_exists:
+                print("Checking if table is loaded with data...")
+                table_loaded = ChromeManager.is_table_loaded_with_data(driver, short_wait)
+                print(f"Table loaded status: {table_loaded}")
 
-                    search_success = False
-                    max_retries = 3
-                    retry_count = 0
+                if table_loaded:
+                    print("Table successfully loaded with data!")
+                    break
+            time.sleep(0.5)
 
-                    while retry_count < max_retries:
-                        try:
-                            search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                            driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
-                            driver.execute_script("arguments[0].click();", search_button)
+        matched_results = []
+        unmatched_results = extracted_results.copy()
 
-                            def is_search_complete():
-                                try:
-                                    if driver.find_elements(By.CLASS_NAME, "preloader-container"):
-                                        return False
-                                    table = driver.find_element(By.ID, "TBLDANHSACH")
-                                    if not table:
-                                        return False
+        # Tìm kiếm trực tiếp theo số tờ khai
+        print(f"\nTiến hành tìm kiếm {len(unmatched_results)} tờ khai...")
+        max_retries = 3
 
-                                    new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
-                                    has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
+        # Tạo một list để lưu các customs_number đã match
+        matched_customs_numbers = []
 
-                                    if new_rows > 0 or has_no_data:
-                                        return True
-                                    return False
-                                except Exception:
-                                    return False
-
-                            start_time = time.time()
-                            while time.time() - start_time < 30:
-                                if is_search_complete():
-                                    search_success = True
-                                    break
-                                time.sleep(0.1)
-
-                            if search_success:
-                                break
-
-                        except Exception as e:
-                            retry_count += 1
-                            if retry_count == max_retries:
-                                print(f"MST {tax_number}: Không thể hoàn thành tìm kiếm sau {max_retries} lần thử - bỏ qua")
-                                download_results.append({
-                                    'tax_number': tax_number,
-                                    'status': 'error',
-                                    'customs_count': len(customs_numbers),
-                                    'success_count': 0,
-                                    'error': f'Lỗi tìm kiếm sau {max_retries} lần thử'
-                                })
-                                continue
-                            time.sleep(1)
-
-                try:
-                    # Tìm bảng và trích xuất số tờ khai
-                    table = driver.find_element(By.ID, "TBLDANHSACH")
-                    rows = table.find_elements(By.TAG_NAME, "tr")
-                except Exception as e:
-                    print(f"MST {tax_number}: Lỗi khi tìm bảng dữ liệu: {str(e)} - bỏ qua")
-                    download_results.append({
-                        'tax_number': tax_number,
-                        'status': 'error',
-                        'customs_count': len(customs_numbers),
-                        'success_count': 0,
-                        'error': f'Lỗi load bảng: {str(e)}'
-                    })
-                    continue
-
-            except Exception as e:
-                print(f"MST {tax_number}: Lỗi không xác định: {str(e)} - bỏ qua")
-                download_results.append({
-                    'tax_number': tax_number,
-                    'status': 'error',
-                    'customs_count': len(customs_numbers),
-                    'success_count': 0,
-                    'error': f'Lỗi không xác định: {str(e)}'
-                })
+        for unmatched in unmatched_results[:]:  # Tạo một copy để iterate
+            customs_number = unmatched.get('customs_number')
+            if not customs_number:
                 continue
 
-            matched_results = []
-            for row in rows[1:]:  # Bỏ qua row đầu tiên (header)
-                try:
-                    cells = row.find_elements(By.TAG_NAME, "td")
-                    if len(cells) == 1 and "No data available" in cells[0].text:
-                        continue
-                    custom_no = str(cells[4].text.strip())  # Đảm bảo là string
-                    matching_customs = next(
-                        (customs for customs in customs_numbers
-                            if str(customs['customs_number']) == custom_no),  # Đảm bảo là string
+            print(f"\nTìm kiếm tờ khai {customs_number}...")
+            try:
+                # Điền số tờ khai
+                so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
+                so_tk_input.clear()
+                so_tk_input.send_keys(customs_number)
+
+                # Thực hiện tìm kiếm với retry
+                search_success = False
+                retry_count = 0
+
+                while retry_count < max_retries:
+                    try:
+                        search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
+                        driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
+                        driver.execute_script("arguments[0].click();", search_button)
+
+                        if ChromeManager.wait_for_search_complete(driver):
+                            search_success = True
+                            break
+
+                    except Exception as e:
+                        retry_count += 1
+                        if retry_count == max_retries:
+                            print(f"Không thể tìm kiếm tờ khai {customs_number} sau {max_retries} lần thử")
+                            break
+                        time.sleep(1)
+
+                if not search_success:
+                    continue
+
+                # Xử lý kết quả tìm kiếm
+                table = driver.find_element(By.ID, "TBLDANHSACH")
+                rows = table.find_elements(By.TAG_NAME, "tr")
+
+                if len(rows) <= 1 or "No data available" in rows[1].text:
+                    print(f"Không tìm thấy dữ liệu cho tờ khai {customs_number}")
+                    continue
+
+                # Lấy thông tin từ row đầu tiên
+                first_row = rows[1]
+                cells = first_row.find_elements(By.TAG_NAME, "td")
+                found_custom_no = str(cells[4].text.strip())
+
+                if found_custom_no == str(customs_number):
+                    link_cell = cells[1]
+                    link_element = link_cell.find_element(By.TAG_NAME, "a")
+                    href = link_element.get_attribute("href")
+                    mhd = href.split("mhd=")[-1] if "mhd=" in href else ""
+
+                    raw_series_no = cells[7].text.strip() if len(cells) > 7 else ''
+                    seriesNo = raw_series_no.split('/')[-1].strip() if '/' in raw_series_no else raw_series_no
+
+                    matched_result = {
+                        'custom_no': found_custom_no,
+                        'invoice_no': cells[8].text.strip() if len(cells) > 8 else '',
+                        'seriesNo': seriesNo,
+                        'ngay': cells[9].text.strip() if len(cells) > 9 else '',
+                        'total_amount': convert_price_to_number(cells[11].text.strip()) if len(cells) > 11 else 0,
+                        'drive_link': mhd,
+                        'tax_number': unmatched.get('tax_number'),
+                        'so_ct': unmatched.get('so_ct', ''),
+                        'partner_invoice_name': unmatched.get('partner_invoice_name', ''),
+                        'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                    matched_results.append(matched_result)
+                    matched_customs_numbers.append(customs_number)
+                    print(f"Đã tìm thấy tờ khai {customs_number}")
+
+            except Exception as e:
+                print(f"Lỗi khi xử lý tờ khai {customs_number}: {str(e)}")
+                continue
+
+        # Remove các kết quả đã match khỏi unmatched_results
+        unmatched_results = [result for result in unmatched_results
+                           if result.get('customs_number') not in matched_customs_numbers]
+
+        # In thống kê kết quả
+        print(f"\nKết quả tìm kiếm:")
+        print(f"Tổng số tờ khai: {len(extracted_results)}")
+        print(f"Số tờ khai đã match: {len(matched_results)}")
+        print(f"Số tờ khai chưa match: {len(unmatched_results)}")
+
+        if unmatched_results:
+            print("\nDanh sách tờ khai không tìm thấy:")
+            for unmatched in unmatched_results:
+                print(f"- Số tờ khai: {unmatched.get('customs_number')}")
+
+        # Xử lý các kết quả đã match
+        if matched_results:
+            # Query database để lấy thêm thông tin
+            customs_numbers = [result['custom_no'] for result in matched_results]
+
+            try:
+                # Kết nối database sử dụng pyodbc
+                conn = pyodbc.connect(
+                    'DRIVER={ODBC Driver 18 for SQL Server};'
+                    'SERVER=of1.beelogistics.com,34541;'
+                    'DATABASE=BEE_DB;'
+                    'UID=devhph;'
+                    'PWD=Hph@dev!@#123;'
+                    'TrustServerCertificate=yes;'
+                )
+
+                # Tạo điều kiện LIKE cho mỗi customs number
+                like_conditions = []
+                params = []
+                for customs_no in customs_numbers:
+                    like_conditions.append("cs.TKSo LIKE ?")
+                    params.append(f"%{customs_no}%")
+
+                # Chuẩn bị query với multiple LIKE conditions
+                query = f"""
+                    SELECT
+                        td.TransID,
+                        td.HWBNO as hawb,
+                        cs.TKSo as customs_no,
+                        p.PartnerID,
+                        p.PartnerName3
+                    FROM TransactionDetails td
+                    JOIN CustomsDeclaration cs ON cs.MasoTK = td.CustomsID
+                    JOIN Partners p ON p.PartnerID = td.ShipperID
+                    WHERE {' OR '.join(like_conditions)}
+                    ORDER BY td.TransID
+                """
+
+                # Thực hiện query
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+
+                # Lấy tên cột
+                columns = [column[0] for column in cursor.description]
+
+                # Fetch kết quả dạng dictionary
+                db_results = []
+                for row in cursor.fetchall():
+                    db_results.append(dict(zip(columns, row)))
+
+                # Convert to dict for easier lookup
+                db_data = {}
+                for customs_no in customs_numbers:
+                    # Check if customsNumber has 12 characters and remove the last one
+                    search_customs_no = customs_no
+                    if len(customs_no) == 12:
+                        search_customs_no = customs_no[:-1]
+
+                    # Tìm row đầu tiên chứa customs_no
+                    matching_row = next(
+                        (row for row in db_results if search_customs_no in row['customs_no']),
                         None
                     )
 
-                    if matching_customs:
-                        link_cell = cells[1]
-                        link_element = link_cell.find_element(By.TAG_NAME, "a")
-                        href = link_element.get_attribute("href")
-                        mhd = href.split("mhd=")[-1] if "mhd=" in href else ""
-
-                        raw_series_no = cells[7].text.strip() if len(cells) > 7 else ''
-                        seriesNo = raw_series_no.split('/')[-1].strip() if '/' in raw_series_no else raw_series_no
-
-                        result = {
-                            'custom_no': custom_no,
-                            'invoice_no': cells[8].text.strip() if len(cells) > 8 else '',
-                            'seriesNo': seriesNo,
-                            'ngay': cells[9].text.strip() if len(cells) > 9 else '',
-                            'total_amount': convert_price_to_number(cells[11].text.strip()) if len(cells) > 11 else 0,
-                            'drive_link': mhd,
-                            'tax_number': tax_number,
-                            'so_ct': matching_customs.get('so_ct', ''),
-                            'partner_invoice_name': matching_customs.get('partner_invoice_name', ''),
-                            'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    if matching_row:
+                        db_data[customs_no] = {
+                            'jobId': str(matching_row['TransID']),
+                            'hawb': matching_row['hawb'],
+                            'partner_id': matching_row['PartnerID'],
+                            'partner_name': matching_row['PartnerName3']
                         }
-                        matched_results.append(result)
 
-                except Exception as e:
-                    print(f"Lỗi khi xử lý row: {str(e)}")
-                    continue
+                # Merge data vào matched_results
+                for result in matched_results:
+                    customs_no = result['custom_no']
+                    if customs_no in db_data:
+                        result.update({
+                            'jobId': db_data[customs_no]['jobId'],
+                            'hawb': db_data[customs_no]['hawb'],
+                            'partner_invoice_id': db_data[customs_no]['partner_id'],
+                            'partner_invoice_name': db_data[customs_no]['partner_name']
+                        })
+                    else:
+                        print(f"Không tìm thấy dữ liệu trong DB cho customs number: {customs_no}")
 
-            if len(matched_results) != len(customs_numbers):
-                matched_customs_numbers = {str(result['custom_no']) for result in matched_results}
-                unmatched_customs = [
-                    customs for customs in customs_numbers
-                    if str(customs['customs_number']) not in matched_customs_numbers
-                ]
-                for customs in unmatched_customs:
-                    try:
-                        so_tk_input = wait.until(EC.presence_of_element_located((By.NAME, "SO_TK")))
-                        so_tk_input.clear()
-                        so_tk_input.send_keys(customs['customs_number'])
+                cursor.close()
+                conn.close()
 
-                        # tu_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "TU_NGAY")))
-                        # tu_ngay_input.clear()
-
-                        # den_ngay_input = wait.until(EC.presence_of_element_located((By.NAME, "DEN_NGAY")))
-                        # den_ngay_input.clear()
-
-                        max_retries = 3
-                        retry_count = 0
-                        while retry_count < max_retries:
-                            try:
-                                search_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btnSearch")))
-                                driver.execute_script("arguments[0].scrollIntoView(true);", search_button)
-                                driver.execute_script("arguments[0].click();", search_button)
-                                # time.sleep(10)
-
-                                def is_search_complete():
-                                    try:
-                                        if driver.find_elements(By.CLASS_NAME, "preloader-container"):
-                                            return False
-                                        table = driver.find_element(By.ID, "TBLDANHSACH")
-                                        if not table:
-                                            return False
-                                        new_rows = len(driver.find_elements(By.CSS_SELECTOR, "#TBLDANHSACH tr"))
-                                        has_no_data = bool(driver.find_elements(By.CSS_SELECTOR, ".dataTables_empty"))
-                                        if new_rows > 0 or has_no_data:
-                                            return True
-                                        return False
-                                    except Exception:
-                                        return False
-
-                                start_time = time.time()
-                                search_completed = False
-                                while time.time() - start_time < 30:
-                                    if is_search_complete():
-                                        search_completed = True
-                                        break
-                                    time.sleep(0.1)  # Check mỗi 100ms
-
-                                if search_completed:
-                                    break  # Thoát khỏi vòng lặp retry
-                                else:
-                                    raise TimeoutException("Timeout chờ kết quả tìm kiếm")
-
-                            except Exception as e:
-                                retry_count += 1
-                                print(f"- Lỗi: {str(e)}")
-                                if retry_count == max_retries:
-                                    raise Exception(f"Không thể hoàn thành tìm kiếm sau {max_retries} lần thử")
-                                print(f"- Đợi 4s trước khi thử lại...")
-                                time.sleep(4)  # Tăng thời gian chờ giữa các lần thử
-
-                        table = driver.find_element(By.ID, "TBLDANHSACH")
-                        rows = table.find_elements(By.TAG_NAME, "tr")
-
-                        if len(rows) <= 1:  # Chỉ có header
-                            continue
-
-                        first_row = rows[1]
-                        cells = first_row.find_elements(By.TAG_NAME, "td")
-
-                        if len(cells) == 1 and "No data available" in cells[0].text:
-                            continue
-
-                        found_custom_no = str(cells[4].text.strip())
-                        print(f"Đã tìm thấy tờ khai {found_custom_no}")
-
-                        if found_custom_no == str(customs['customs_number']):
-                            try:
-                                link_cell = cells[1]
-                                link_element = link_cell.find_element(By.TAG_NAME, "a")
-                                href = link_element.get_attribute("href")
-                                mhd = href.split("mhd=")[-1] if "mhd=" in href else ""
-
-                                raw_series_no = cells[7].text.strip() if len(cells) > 7 else ''
-                                seriesNo = raw_series_no.split('/')[-1].strip() if '/' in raw_series_no else raw_series_no
-
-                                result = {
-                                    'custom_no': found_custom_no,
-                                    'invoice_no': cells[8].text.strip() if len(cells) > 8 else '',
-                                    'seriesNo': seriesNo,
-                                    'ngay': cells[9].text.strip() if len(cells) > 9 else '',
-                                    'total_amount': convert_price_to_number(cells[11].text.strip()) if len(cells) > 11 else 0,
-                                    'drive_link': mhd,
-                                    'tax_number': customs.get('tax_number'),
-                                    'so_ct': customs.get('so_ct', ''),
-                                    'partner_invoice_name': customs.get('partner_invoice_name', ''),
-                                    'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                }
-                                matched_results.append(result)
-                            except:
-                                print(f"Lỗi khi trích xuất dữ liệu tờ khai {found_custom_no}")
-                                print(f"Cells: {cells}")
-                                continue
-
-                        else:
-                            continue
-
-                    except Exception as e:
-                        print(f"Lỗi khi tìm kiếm tờ khai {customs['customs_number']}: {str(e)}")
-                        continue
-
-                # Thông báo kết quả cuối cùng
-                final_unmatched = [
-                    customs for customs in customs_numbers
-                    if str(customs['customs_number']) not in {str(result['custom_no']) for result in matched_results}
-                ]
-
-                if final_unmatched:
-                    print("\nDanh sách tờ khai không tìm thấy và sẽ bị bỏ qua:")
-                    for customs in final_unmatched:
-                        print(f"- Số tờ khai: {customs['customs_number']}")
-
-            success_count, drive_upload_results = process_matched_results(driver, matched_results, cached_extracted_files)
-
-            download_results.append({
-                'tax_number': tax_number,
-                'status': 'success' if success_count > 0 else 'error',
-                'customs_count': len(customs_numbers),
-                'success_count': success_count
-            })
-
-            # Redirect về trang login sau khi xử lý xong tax_number
-            try:
-                CookieManager.clear_all_cookies_and_sessions(driver)
-                driver.get("http://thuphi.haiphong.gov.vn:8222/dang-nhap")
             except Exception as e:
-                print(f"Lỗi khi redirect về trang login: {str(e)}")
+                print(f"Lỗi khi query database: {str(e)}")
+                if 'cursor' in locals():
+                    cursor.close()
+                if 'conn' in locals():
+                    conn.close()
 
-            try:
-                if 'session' in locals():
-                    session.close()
-            except:
-                pass
+            success_count = process_matched_results(driver, matched_results, extracted_results)
+
+        download_results.append({
+            'tax_number': tax_number,
+            'status': 'success' if success_count > 0 else 'error',
+            'customs_count': len(extracted_results),
+            'success_count': success_count
+        })
 
         # Tính toán thống kê và trả về kết quả
         stats = {
@@ -528,7 +393,8 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             'processed': len(extracted_results),
             'download_success': sum(r['success_count'] for r in download_results),
             'download_error': sum(r['customs_count'] - r['success_count'] for r in download_results),
-            'drive_uploads': drive_upload_results
+            'drive_uploads': drive_upload_results,
+            'moved_files': success_count
         }
 
         return {
@@ -593,157 +459,123 @@ def download_invoice_pdf(driver, invoice_info):
         except:
             pass
 
-def process_and_upload_invoice(invoice_info, pdf_data, cached_extracted_files, drive_upload_results):
+def process_and_upload_invoices_batch(invoice_batch):
     """
-    Upload PDF lên drive và append vào sheet, sau đó di chuyển file đã xử lý vào thư mục success
+    Upload nhiều PDF lên drive và append sheet theo batch
     """
     try:
-        customs_no = invoice_info.get('custom_no')
+        # Chuẩn bị data cho batch upload
+        files_to_upload = []
+        sheet_rows = []
 
-        ngay_formatted = invoice_info['ngay'].replace('/', '') if invoice_info.get('ngay') else datetime.now().strftime('%d%m%Y')
+        for invoice_info, pdf_data in invoice_batch:
+            ngay_formatted = invoice_info['ngay'].replace('/', '') if invoice_info.get('ngay') else datetime.now().strftime('%d%m%Y')
 
+            # Xử lý jobId nếu có
+            job_id_prefix = ""
+            if invoice_info.get('jobId'):
+                # Trim và lấy phần tử đầu tiên nếu có dấu /
+                job_id = invoice_info['jobId'].strip()
+                if '/' in job_id:
+                    job_id = job_id.split('/')[0]
+                job_id_prefix = f"{job_id}_"
 
-        drive_instance = DriveService.get_instance()
-        service = drive_instance.service
-        root_id = drive_instance.get_root_folder_id('CUSTOMS')
+            filename = f"{job_id_prefix}CSHT{invoice_info['invoice_no']}.pdf"
 
-        date_folder_id = get_or_create_folder(service, root_id, ngay_formatted)
-        if not date_folder_id:
-            raise Exception("Không thể tạo/tìm folder ngày")
+            files_to_upload.append({
+                'content': pdf_data,
+                'filename': filename,
+                'date_folder': ngay_formatted,
+                'invoice_no': invoice_info['invoice_no']
+            })
 
-        filename = f"CSHT_{invoice_info['invoice_no']}.pdf"
-        pattern = ['BEHPH', 'BLHPH', 'BIHPH', 'BEHAN', 'BLHAN', 'BIHAN', 'BLDAD', 'BEDAD', 'BIDAD', 'BEHCM', 'BLHCM', 'BIHCM']
+            sheet_rows.append(invoice_info)
 
-        # Upload related customs file if exists
-        if customs_no and customs_no in cached_extracted_files:
-            try:
-                cached_data = cached_extracted_files[customs_no]
-                source_file = cached_data['header_info']['source_file']
+        # Batch upload files to Drive
+        upload_results = batch_upload_to_drive(files_to_upload)
+        print(f"Đã upload {len(upload_results)} files lên Drive")
 
-                # Xử lý source_file để tạo prefix cho filename
-                prefix = None
-                for p in pattern:
-                    if p in source_file:
-                        # Lấy phần text trước pattern và xử lý
-                        prefix = source_file[:source_file.index(p)].strip()
-                        prefix = prefix.replace(' ', '_')
-                        prefix = prefix.replace('-', '_').replace(' ', '_')
-                        break
+        # Batch append to sheet
+        append_result = batch_append_to_sheet(sheet_rows)
+        print(f"Đã append {len(sheet_rows)} dòng vào sheet")
 
-                if prefix:
-                    filename = f"{prefix}_{filename}"
-
-                customs_upload_result = upload_file_to_drive(
-                    file_content=cached_data['file_content'],
-                    filename=source_file,
-                    parent_folder_date=ngay_formatted
-                )
-
-                if customs_upload_result['success']:
-                    cached_data['header_info']['drive_file_path'] = customs_upload_result['file_path']
-                    drive_upload_results.append({
-                        'file': source_file,
-                        'status': 'success',
-                        'path': customs_upload_result['file_path']
-                    })
-
-                    # Move file to customs_success folder after successful upload
-                    source_path = os.path.join(get_default_customs_dir(), source_file)
-                    success_dir = os.path.join(get_default_customs_dir(), 'customs_success')
-
-                    # Create customs_success directory if it doesn't exist
-                    if not os.path.exists(success_dir):
-                        os.makedirs(success_dir)
-
-                    target_path = os.path.join(success_dir, source_file)
-
-                    try:
-                        # If file already exists in success folder, replace it
-                        if os.path.exists(target_path):
-                            os.remove(target_path)
-                        shutil.move(source_path, target_path)
-                        print(f"Đã di chuyển file {source_file} vào thư mục customs_success")
-                    except Exception as move_error:
-                        print(f"Lỗi khi di chuyển file {source_file}: {str(move_error)}")
-
-                else:
-                    drive_upload_results.append({
-                        'file': cached_data['header_info']['source_file'],
-                        'status': 'error',
-                        'error': customs_upload_result.get('error', 'Unknown error')
-                    })
-            except Exception as e:
-                print(f"Lỗi upload file cho customs_no {customs_no}: {str(e)}")
-
-        file_exists, existing_file_id = check_file_exists(service, date_folder_id, filename)
-
-        if file_exists:
-            print(f"File {filename} đã tồn tại trong thư mục {ngay_formatted}")
-            upload_result = {
-                'success': True,
-                'file_id': existing_file_id,
-                'file_path': f"{ngay_formatted}/{filename}",
-                'already_exists': True
-            }
-        else:
-            upload_result = upload_file_to_drive(
-                file_content=pdf_data,
-                filename=filename,
-                parent_folder_date=ngay_formatted
-            )
-
-        if upload_result['success']:
-            if append_to_google_sheet_new(invoice_info):
-                print(f"Đã upload và append sheet thành công cho biên lai {invoice_info['invoice_no']}")
-                return True
-        else:
-            print(f"Lỗi upload file: {upload_result.get('error')}")
-
-        return False
+        return True
 
     except Exception as e:
-        print(f"Lỗi khi upload/append biên lai {invoice_info['invoice_no']}: {str(e)}")
+        print(f"Lỗi khi xử lý batch: {str(e)}")
         return False
 
-def process_matched_results(driver, matched_results, cached_extracted_files):
+def process_matched_results(driver, matched_results, extracted_results, batch_size=10):
     """
-    Xử lý danh sách các biên lai đã match
+    Xử lý danh sách các biên lai đã match theo batch và di chuyển file thành công
 
     Args:
         driver: WebDriver instance
         matched_results: List các biên lai đã match
-        cached_extracted_files: Dict chứa các file đã extract
-
-    Returns:
-        tuple: (success_count, drive_upload_results)
+        extracted_results: List các kết quả trích xuất ban đầu
+        batch_size: Số lượng file xử lý mỗi batch
     """
     success_count = 0
-    drive_upload_results = []
-    cached_files = {}
+    current_batch = []
+
+    # Get directories
+    customs_dir = get_default_customs_dir()
+    success_dir = os.path.join(os.path.dirname(customs_dir), 'customs_success')
+    os.makedirs(success_dir, exist_ok=True)
+
+    # Create mapping of customs numbers to source files
+    customs_to_file = {
+        result.get('customs_number'): result.get('source_file')
+        for result in extracted_results
+        if result.get('customs_number') and result.get('source_file')
+    }
 
     # Download all PDFs first
     for invoice_info in matched_results:
         pdf_data = download_invoice_pdf(driver, invoice_info)
         if pdf_data:
-            cached_files[invoice_info['invoice_no']] = {
-                'pdf_data': pdf_data,
-                'invoice_info': invoice_info
-            }
-            print(f"Đã download và cache biên lai {invoice_info['invoice_no']}")
+            current_batch.append((invoice_info, pdf_data))
+            print(f"Đã download biên lai {invoice_info['invoice_no']}")
 
-    # Process and upload files
-    for invoice_no, cache_data in cached_files.items():
-        if process_and_upload_invoice(
-            cache_data['invoice_info'],
-            cache_data['pdf_data'],
-            cached_extracted_files,
-            drive_upload_results
-        ):
-            success_count += 1
+            # Move source PDF file if successful
+            customs_no = invoice_info.get('custom_no')
+            if customs_no and customs_no in customs_to_file:
+                source_file = customs_to_file[customs_no]
+                source_path = os.path.join(customs_dir, source_file)
+                dest_path = os.path.join(success_dir, source_file)
 
-    return success_count, drive_upload_results
+                try:
+                    if os.path.exists(source_path):
+                        shutil.move(source_path, dest_path)
+                        print(f"Đã chuyển file {source_file} sang thư mục success")
+                except Exception as e:
+                    print(f"Lỗi khi di chuyển file {source_file}: {str(e)}")
 
-def handle_login_process(driver, tax_number):
+            # Process batch when reaching batch_size
+            if len(current_batch) >= batch_size:
+                if process_and_upload_invoices_batch(current_batch):
+                    success_count += len(current_batch)
+                current_batch = []
+
+    # Process remaining files
+    if current_batch:
+        if process_and_upload_invoices_batch(current_batch):
+            success_count += len(current_batch)
+
+    return success_count
+
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+def handle_login_process(driver, username):
     """
     Xử lý quá trình đăng nhập với MST cho trước
 
@@ -757,6 +589,33 @@ def handle_login_process(driver, tax_number):
     Raises:
         Exception: Nếu không thể đăng nhập sau khi thử
     """
+    # Default fallback credentials
+    login_username = "0303482440"
+    login_password = "@Mst0303482440"
+
+    # Try to load accounts from accounts.json
+    try:
+        # Thử load file gốc trong development
+        accounts_path = 'accounts.json'
+        if not os.path.exists(accounts_path):
+            # Trong production,
+            accounts_path = get_resource_path(accounts_path)
+
+        if os.path.exists(accounts_path):
+            with open(accounts_path, 'r') as f:
+                accounts = json.load(f)
+            # Get random account
+            account = random.choice(accounts)
+            login_username = account['username']
+            login_password = account['password']
+            print(f"Sử dụng tài khoản ngẫu nhiên: {login_username}")
+        else:
+            print(f"Không tìm thấy file accounts tại {accounts_path}")
+            print(f"Sử dụng tài khoản mặc định: {login_username}")
+    except Exception as e:
+        print(f"Lỗi khi đọc file accounts: {str(e)}")
+        print(f"Sử dụng tài khoản mặc định: {login_username}")
+
     # Khởi tạo WebDriverWait với timeout dài hơn
     long_wait = WebDriverWait(driver, 120)  # 2 phút
     short_wait = WebDriverWait(driver, 2)   # 2 giây
@@ -774,7 +633,7 @@ def handle_login_process(driver, tax_number):
     # Login process
     login_success = False
 
-    cookies_loaded = CookieManager.load_cookies(driver, tax_number)
+    cookies_loaded = CookieManager.load_cookies(driver, username)
     if cookies_loaded:
         if ChromeManager.wait_for_page_load(driver, ChromeManager.HOME_URL):
             try:
@@ -786,10 +645,10 @@ def handle_login_process(driver, tax_number):
     if not login_success:
         if ChromeManager.wait_for_page_load(driver, ChromeManager.LOGIN_URL):
             long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-            if ChromeManager.fill_login_info(driver, tax_number, tax_number):
+            if ChromeManager.fill_login_info(driver, login_username, login_password):
                 login_success = True
 
     if not login_success:
-        raise Exception(f"Không thể đăng nhập với MST {tax_number}")
+        raise Exception(f"Không thể đăng nhập với MST {username}")
 
     return login_success

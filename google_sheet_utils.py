@@ -177,6 +177,25 @@ class SheetService:
                         'fields': 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment,horizontalAlignment)'
                     }
                 },
+                # Định dạng text cho cột Custom No (index 4)
+                {
+                    'repeatCell': {
+                        'range': {
+                            'sheetId': new_sheet_id,
+                            'startRowIndex': 1,
+                            'startColumnIndex': 4,
+                            'endColumnIndex': 5
+                        },
+                        'cell': {
+                            'userEnteredFormat': {
+                                'numberFormat': {
+                                    'type': 'TEXT'
+                                }
+                            }
+                        },
+                        'fields': 'userEnteredFormat.numberFormat'
+                    }
+                },
                 # Điều chỉnh độ rộng cột cho VendorName (index 1)
                 {
                     'updateDimensionProperties': {
@@ -311,7 +330,7 @@ def append_to_google_sheet_new(extracted_info):
             fixed_data['vendor'],
             extracted_info.get('jobId', ''),
             extracted_info.get('hawb', ''),
-            f"'{extracted_info.get('custom_no', '')}'",  # Số tờ khai - thêm dấu nháy để giữ số 0
+            f"'{extracted_info.get('custom_no', '')}",
             fixed_data['charge_code'],
             fixed_data['description'],
             1,
@@ -320,7 +339,7 @@ def append_to_google_sheet_new(extracted_info):
             '', # tax
             extracted_info.get('total_amount', ''),
             extracted_info.get('tax_number', '') != '0303482440',
-            f"'{extracted_info.get('invoice_no', '').zfill(8)}",  # Số hóa đơn - thêm số 0 ở đầu cho đủ 8 số
+            f"'{extracted_info.get('invoice_no', '').zfill(8)}",
             extracted_info.get('seriesNo', ''),
             extracted_info.get('ngay', ''),
             '',
@@ -338,5 +357,65 @@ def append_to_google_sheet_new(extracted_info):
 
     except Exception as e:
         print(f"Lỗi không mong đợi: {str(e)}")
+        return False
+
+def batch_append_to_sheet(rows):
+    """
+    Append nhiều dòng vào sheet cùng lúc
+    """
+    try:
+        sheet_instance = SheetService.get_instance()
+        sheet = sheet_instance.service.spreadsheets()  # Thêm .spreadsheets()
+
+        # Group rows by date
+        date_groups = {}
+        for row in rows:
+            date = row.get('ngay', datetime.now().strftime('%d/%m/%Y'))
+            if date not in date_groups:
+                date_groups[date] = []
+            date_groups[date].append(row)
+
+        # Batch append for each date group
+        for date, group_rows in date_groups.items():
+            sheet_name = sheet_instance.get_or_create_sheet(date)
+            values = []
+
+            for row in group_rows:
+                fixed_data = {
+                    'service_code': 'CL015567',
+                    'vendor': 'SO GTVT- SO GIAO THONG VAN TAI',
+                    'charge_code': 'B_CSHT',
+                    'description': 'INFRASTRUCTURE FEES',
+                    'unit': 'shipment'
+                }
+
+                row_data = [
+                    fixed_data['service_code'],
+                    fixed_data['vendor'],
+                    row.get('jobId', ''),
+                    row.get('hawb', ''),
+                    f"'{row.get('custom_no', '')}",
+                    fixed_data['charge_code'],
+                    fixed_data['description'],
+                    1,
+                    fixed_data['unit'],
+                    row.get('total_amount', ''),
+                    '', # tax
+                    row.get('total_amount', ''),
+                    row.get('tax_number', '') != '0303482440',
+                    f"'{row.get('invoice_no', '').zfill(8)}",
+                    row.get('seriesNo', ''),
+                    row.get('ngay', ''),
+                    row.get('partner_invoice_id', ''),
+                    row.get('partner_invoice_name'),
+                ]
+                values.append(row_data)
+
+            execute_append(sheet, sheet_name, values)
+
+        return True
+
+    except Exception as e:
+        print(f"Lỗi batch append to sheet: {str(e)}")
         return False
 

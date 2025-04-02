@@ -122,19 +122,42 @@ def extract_header_info(lines):
                         break
                 break
 
+        # Tạo các biến thể của "Số tờ khai Hải quan"
+        customs_variants = [
+            "Số tờ khai Hải quan",
+            "Số tờ khai hải quan",
+            "So to khai hai quan",
+            "Số tờ khai HQ",
+            "Số tờ khai",
+            "Tờ khai HQ số",
+            "Tờ khai số",
+            "STK HQ:",
+            "STK HQ số:",
+            "STK số:",
+            "Số TK HQ:",
+            "Số TK:",
+            "TK HQ số"
+        ]
+
         for i, line in enumerate(lines):
-            if line == "Số tờ khai Hải quan:":
-                if i + 2 < len(lines):
-                    customs_number = lines[i + 2].strip()
-                    if customs_number.isdigit():
-                        result['customs_number'] = str(customs_number)  # Đảm bảo lưu dạng string
-                    # Tìm ngày ở phần tử tiếp theo sau số tờ khai
-                    if i + 3 < len(lines):
-                        potential_date = lines[i + 3].strip()
-                        # Kiểm tra format ngày dd/mm/yyyy
-                        if len(potential_date) == 10 and potential_date[2] == '/' and potential_date[5] == '/':
-                            result['date'] = potential_date
-                break
+            # Kiểm tra nếu dòng hiện tại khớp với bất kỳ biến thể nào
+            if any(variant in line for variant in customs_variants):
+                # Tìm số tờ khai trong 5 dòng tiếp theo
+                for j in range(i + 1, min(i + 6, len(lines))):
+                    potential_customs = lines[j].strip()
+
+                    # Kiểm tra xem có phải là số và có đúng 12 chữ số
+                    if potential_customs.isdigit() and len(potential_customs) == 12:
+                        result['customs_number'] = str(potential_customs)
+                        # Tìm ngày ở phần tử tiếp theo sau số tờ khai
+                        if j + 1 < len(lines):
+                            potential_date = lines[j + 1].strip()
+                            # Kiểm tra format ngày dd/mm/yyyy
+                            if len(potential_date) == 10 and potential_date[2] == '/' and potential_date[5] == '/':
+                                result['date'] = potential_date
+                        break
+                if result['customs_number']:  # Nếu đã tìm thấy số tờ khai hợp lệ thì thoát
+                    break
 
         if not all(result.values()):
             missing = [k for k, v in result.items() if v is None]
@@ -264,14 +287,14 @@ def process_pdf(pdf_path):
 
 def main():
 
-    pdf_path = "data/1.pdf"
+    pdf_path = "data/4.pdf"
     sections = extract_text_from_pdf(pdf_path)
     if not sections:
         return None
 
     print(json.dumps(sections, indent=2, ensure_ascii=False))
 
-    result = extract_header_info(sections['table'])
+    result = extract_header_info(sections['header'])
     print("Kết quả xử lý:\n")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 

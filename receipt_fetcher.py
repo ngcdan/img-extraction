@@ -541,6 +541,7 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
             customs_no = invoice_info.get('custom_no')
             if customs_no and customs_no in customs_to_file:
                 source_file = customs_to_file[customs_no]
+                invoice_info['source_file'] = source_file
                 source_path = os.path.join(customs_dir, source_file)
                 dest_path = os.path.join(success_dir, source_file)
 

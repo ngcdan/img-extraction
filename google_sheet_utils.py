@@ -15,7 +15,7 @@ SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
 HEADER_ROW = [
     'PartnerID', 'PartnerName', 'JobNo', 'HBLNo', 'Custom No',
     'FeeCode', 'FeeName', 'Quantity', 'Unit', 'Amount', 'VAT',
-    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate',  'PartnerID_Inv', 'PartnerName_Inv'
+    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate',  'PartnerID_Inv', 'PartnerName_Inv', 'Source From'
 ]
 
 class SheetService:
@@ -344,6 +344,7 @@ def append_to_google_sheet_new(extracted_info):
             extracted_info.get('ngay', ''),
             '',
             extracted_info.get('partner_invoice_name'),
+            extracted_info.get('source_from'),
         ]
         values.append(row_data)
 

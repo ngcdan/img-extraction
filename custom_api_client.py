@@ -71,19 +71,34 @@ class CustomApiClient:
             )
         except requests.RequestException as e:
             error_message = f"Request failed: {str(e)}"
-            error_response = e.response.text if hasattr(e, 'response') else 'No response'
+            error_details = {
+                "url": e.response.url if hasattr(e, 'response') else None,
+                "status_code": e.response.status_code if hasattr(e, 'response') else None,
+                "headers": dict(e.response.headers) if hasattr(e, 'response') else None,
+                "response_text": e.response.text if hasattr(e, 'response') else 'No response',
+                "request_headers": dict(e.request.headers) if hasattr(e, 'request') else None,
+                "request_body": e.request.body if hasattr(e, 'request') else None
+            }
             print(f"Error: {error_message}")
-            print(f"Response: {error_response}")
+            print("Error Details:")
+            print(json.dumps(error_details, indent=2, ensure_ascii=False))
             return ApiResponse(
                 status="ERROR",
-                message=error_message
+                message=error_message,
+                data=error_details
             )
         except json.JSONDecodeError as e:
             error_message = f"Failed to parse JSON response: {str(e)}"
             print(error_message)
+            try:
+                raw_response = response.text
+                print(f"Raw response: {raw_response}")
+            except Exception as raw_err:
+                print(f"Could not get raw response: {str(raw_err)}")
             return ApiResponse(
                 status="ERROR",
-                message=error_message
+                message=error_message,
+                data={"raw_response": raw_response if 'raw_response' in locals() else None}
             )
 
     def fetch_customs_data(self, customs_numbers: List[str]) -> ApiResponse:
@@ -96,23 +111,49 @@ class CustomApiClient:
 def parse_response(response_data: Dict) -> List[Dict]:
     """Parse and extract records from API response data"""
     try:
+        # Kiểm tra response_data có tồn tại
+        if not response_data:
+            print("Response data is None or empty")
+            return []
+
+        # Parse nếu là string
         if isinstance(response_data, str):
-            response_data = json.loads(response_data)
+            try:
+                response_data = json.loads(response_data)
+            except json.JSONDecodeError:
+                print("Failed to parse response_data as JSON string")
+                return []
 
-        # Extract data field and parse it as JSON if it's a string
+        # Kiểm tra và lấy data field
         data = response_data.get('data')
-        if isinstance(data, str):
-            data = json.loads(data)
+        if not data:
+            print("No 'data' field in response")
+            return []
 
-        # Extract records from the nested structure
-        records = data.get('result', {}).get('records', [])
+        # Parse data nếu là string
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                print("Failed to parse data field as JSON string")
+                return []
+
+        # Lấy records với kiểm tra null
+        result = data.get('result', {})
+        if not result:
+            print("No 'result' field in data")
+            return []
+
+        records = result.get('records', [])
+        if not records:
+            print("No records found")
+            return []
+
         return records
 
-    except json.JSONDecodeError:
-        print("Failed to parse JSON response")
-        return []
     except Exception as e:
         print(f"Error parsing response: {str(e)}")
+        print(f"Response data: {response_data}")
         return []
 
 def main():

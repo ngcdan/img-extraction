@@ -276,7 +276,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             customs_numbers = [result['custom_no'] for result in matched_results]
 
             try:
-                api_client = CustomApiClient(ApiCredentials())
+                api_client = CustomApiClient()
                 api_result = api_client.fetch_customs_data(customs_numbers)
                 if api_result.status == "OK":
                     db_results = parse_response(api_result.data)

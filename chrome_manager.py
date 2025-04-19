@@ -25,27 +25,8 @@ class ChromeManager:
             try:
                 print(f"Đang khởi tạo Chrome driver... (lần thử {attempt + 1}/{max_retries})")
 
-                # Xác định đường dẫn profile mặc định của Chrome
-                if platform.system() == 'Windows':
-                    default_profile = os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data')
-                    chrome_path = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-                    if not os.path.exists(chrome_path):
-                        chrome_path = 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
-                else:  # macOS
-                    default_profile = os.path.expanduser('~/Library/Application Support/Google/Chrome')
-                    chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-
-                # Kill tất cả các process Chrome debug hiện tại
-                if platform.system() == 'Windows':
-                    os.system('taskkill /f /im "chrome.exe" >nul 2>&1')
-                else:
-                    os.system('pkill -f "Chrome.*--remote-debugging-port=9222" >/dev/null 2>&1')
-
-                time.sleep(2)  # Đợi process được kill hoàn toàn
-
                 # Thiết lập options cho Chrome
                 chrome_options = webdriver.ChromeOptions()
-                chrome_options.add_argument(f'--user-data-dir={default_profile}')
                 chrome_options.add_argument('--remote-debugging-port=9222')
                 chrome_options.add_argument('--no-first-run')
                 chrome_options.add_argument('--no-default-browser-check')
@@ -93,7 +74,11 @@ class ChromeManager:
                 screen_width = driver.execute_script('return window.screen.width')
                 driver.set_window_position(screen_width - 430 - 100, 40)  # Cách lề phải và trên 40px
 
-                # Navigate to about:blank first to avoid new tab page
+                # Xóa cookies của domain cụ thể
+                driver.get("http://thuphi.haiphong.gov.vn:8222")
+                CookieManager.clear_all_cookies_and_sessions(driver)
+
+                # Navigate to about:blank
                 driver.get("about:blank")
 
                 print("Đã kết nối với Chrome thành công")

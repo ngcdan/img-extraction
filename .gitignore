@@ -18,6 +18,7 @@ training_captchas/
 # Google API credentials
  driver-key.json
  *-service-account.json
+driver-service-account.json
  client_secret*.json
  credentials.json
  token.json

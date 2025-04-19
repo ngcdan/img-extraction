@@ -1,8 +1,11 @@
 import os
+import sys
 import time
+import json
+import random
 import platform
 import logging
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any, List
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -14,82 +17,105 @@ from cookie_manager import CookieManager
 
 logger = logging.getLogger(__name__)
 
+
+def get_resource_path(relative_path: str) -> str:
+    """Lấy đường dẫn tuyệt đối đến tài nguyên, hoạt động trong cả development và production"""
+    try:
+        # PyInstaller tạo một thư mục temp và lưu đường dẫn trong _MEIPASS
+        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(base_path, relative_path)
+    except Exception:
+        return relative_path
+
+
 class ChromeManager:
     LOGIN_URL = "http://thuphi.haiphong.gov.vn:8222/dang-nhap"
     HOME_URL = "http://thuphi.haiphong.gov.vn:8222/Home"
 
     @staticmethod
-    def initialize_chrome(max_retries: int = 3) -> Optional[webdriver.Chrome]:
-        """Khởi tạo Chrome và mở trang web"""
+    def initialize_chrome(max_retries: int = 3, auto_login: bool = True) -> Optional[webdriver.Chrome]:
+        """Khởi tạo Chrome và tự động đăng nhập nếu được yêu cầu
+
+        Args:
+            max_retries: Số lần thử lại tối đa khi khởi tạo Chrome
+            auto_login: Tự động đăng nhập sau khi khởi tạo Chrome
+
+        Returns:
+            WebDriver instance hoặc None nếu không thể khởi tạo
+        """
+        # Lấy thông tin đăng nhập trước để tránh đọc file nhiều lần
+        login_credentials = ChromeManager._get_login_credentials() if auto_login else None
+
         for attempt in range(max_retries):
             try:
-                print(f"Đang khởi tạo Chrome driver... (lần thử {attempt + 1}/{max_retries})")
-
-                # Thiết lập options cho Chrome
+                # Thiết lập options tối thiểu cho Chrome để mở nhanh nhất
                 chrome_options = webdriver.ChromeOptions()
-                chrome_options.add_argument('--remote-debugging-port=9222')
+
+                # Các tham số cần thiết để tăng tốc độ khởi động
                 chrome_options.add_argument('--no-first-run')
                 chrome_options.add_argument('--no-default-browser-check')
                 chrome_options.add_argument('--no-sandbox')
                 chrome_options.add_argument('--disable-dev-shm-usage')
-                chrome_options.add_argument('--disable-gpu')
-                chrome_options.add_argument('--disable-features=TranslateUI')
                 chrome_options.add_argument('--disable-extensions')
                 chrome_options.add_argument('--disable-popup-blocking')
-                chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-                chrome_options.add_argument('--disable-save-password-bubble')
                 chrome_options.add_argument('--disable-notifications')
                 chrome_options.add_argument('--disable-background-networking')
                 chrome_options.add_argument('--disable-background-timer-throttling')
                 chrome_options.add_argument('--disable-backgrounding-occluded-windows')
-                chrome_options.add_argument('--disable-breakpad')
-                chrome_options.add_argument('--disable-component-extensions-with-background-pages')
-                chrome_options.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees')
-                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                chrome_options.add_experimental_option('useAutomationExtension', False)
 
                 # Tắt các popup và tối ưu performance
                 prefs = {
                     "credentials_enable_service": False,
                     "profile.password_manager_enabled": False,
-                    "profile.default_content_setting_values.notifications": 2,
-                    "browser.enable_automation": False,
-                    "browser.show_home_button": False,
                     "browser.startup.homepage": "about:blank",
                     "browser.startup.page": 0
                 }
                 chrome_options.add_experimental_option("prefs", prefs)
 
+                # Tránh phát hiện automation
+                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                chrome_options.add_experimental_option('useAutomationExtension', False)
+
                 # Khởi tạo service và driver
-                service = Service(ChromeDriverManager().install())
-                driver = webdriver.Chrome(service=service, options=chrome_options)
-                driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                    "userAgent": 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
-                })
+                # Sử dụng cách tiếp cận nhanh hơn để tìm ChromeDriver
+                try:
+                    # Thử sử dụng ChromeDriver đã cài đặt trước đó
+                    service = Service()
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                except:
+                    # Nếu không tìm thấy, sử dụng ChromeDriverManager
+                    service = Service(ChromeDriverManager().install())
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
 
-                # Thiết lập kích thước cửa sổ iPhone 14 Pro
-                driver.set_window_size(430, 912)
+                print("Đã khởi tạo Chrome thành công")
 
-                # Lấy kích thước màn hình và đặt vị trí cửa sổ
-                screen_width = driver.execute_script('return window.screen.width')
-                driver.set_window_position(screen_width - 430 - 100, 40)  # Cách lề phải và trên 40px
+                # Nếu cần đăng nhập tự động
+                if auto_login and login_credentials:
+                    try:
+                        # Truy cập trang đăng nhập
+                        if ChromeManager.wait_for_page_load(driver, ChromeManager.LOGIN_URL):
+                            # Đợi form đăng nhập xuất hiện
+                            wait = WebDriverWait(driver, 30)
+                            wait.until(EC.presence_of_element_located((By.ID, "form-username")))
 
-                # Xóa cookies của domain cụ thể
-                driver.get("http://thuphi.haiphong.gov.vn:8222")
-                CookieManager.clear_all_cookies_and_sessions(driver)
+                            # Điền thông tin đăng nhập
+                            if ChromeManager.fill_login_info(driver, login_credentials['username'], login_credentials['password']):
+                                print(f"Đã đăng nhập thành công với tài khoản {login_credentials['username']} | Password: {login_credentials['password']}")
+                            else:
+                                print(f"Không thể đăng nhập tự động với tài khoản {login_credentials['username']} | Password: {login_credentials['password']}")
+                    except Exception as e:
+                        print(f"Lỗi khi đăng nhập tự động với tài khoản {login_credentials['username']} | Password: {login_credentials['password']}: {str(e)}")
+                else:
+                    # Mở trang trống nếu không cần đăng nhập
+                    driver.get("about:blank")
 
-                # Navigate to about:blank
-                driver.get("about:blank")
-
-                print("Đã kết nối với Chrome thành công")
                 return driver
 
             except Exception as e:
                 print(f"Lỗi khi khởi tạo Chrome (lần {attempt + 1}): {str(e)}")
                 if attempt == max_retries - 1:
-                    print("Đã hết số lần thử khởi tạo Chrome")
                     return None
-                time.sleep(3)
+                time.sleep(1)  # Giảm thời gian chờ giữa các lần thử
 
         return None
 
@@ -156,14 +182,6 @@ class ChromeManager:
             except:
                 return False
 
-        # def get_current_captcha() -> Optional[str]:  # Comment lại hàm lấy captcha
-        #     """Lấy giá trị captcha hiện tại"""
-        #     try:
-        #         captcha_input = driver.find_element(By.ID, "CaptchaInputText")
-        #         return captcha_input.get_attribute('value')
-        #     except:
-        #         return None
-
         def fill_form() -> bool:
             """Điền thông tin form"""
             try:
@@ -174,12 +192,6 @@ class ChromeManager:
                 password_input = wait.until(EC.presence_of_element_located((By.ID, "form-password")))
                 password_input.clear()
                 password_input.send_keys(password)
-
-                # try:  # Comment lại phần click vào ô captcha
-                #     captcha_input = driver.find_element(By.ID, "CaptchaInputText")
-                #     captcha_input.click()
-                # except:
-                #     pass
 
                 return True
             except Exception as e:
@@ -324,3 +336,42 @@ class ChromeManager:
         except TimeoutException:
             return False
 
+    @staticmethod
+    def _get_login_credentials() -> Dict[str, str]:
+        """
+        Lấy thông tin đăng nhập từ file accounts.json
+
+        Returns:
+            Dict[str, str]: Thông tin đăng nhập gồm username và password
+        """
+        # Giá trị mặc định nếu không tìm thấy file
+        default_credentials = {
+            "username": "0303482440",
+            "password": "@Mst0303482440"
+        }
+
+        try:
+            # Thử load file accounts.json
+            accounts_path = 'accounts.json'
+            if not os.path.exists(accounts_path):
+                # Trong production, sử dụng đường dẫn tương đối
+                accounts_path = get_resource_path(accounts_path)
+
+            if os.path.exists(accounts_path):
+                # Đọc file và lấy tài khoản ngẫu nhiên
+                with open(accounts_path, 'r') as f:
+                    accounts = json.load(f)
+
+                if accounts and len(accounts) > 0:
+                    account = random.choice(accounts)
+                    print(f"Sử dụng tài khoản ngẫu nhiên: {account['username']} | Password: {account['password']}")
+                    return account
+                else:
+                    print("File accounts.json không có dữ liệu")
+            else:
+                print(f"Không tìm thấy file accounts tại {accounts_path}")
+        except Exception as e:
+            print(f"Lỗi khi đọc file accounts: {str(e)}")
+
+        print(f"Sử dụng tài khoản mặc định: {default_credentials['username']} | Password: {default_credentials['password']}")
+        return default_credentials

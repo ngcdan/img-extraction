@@ -119,23 +119,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         if not driver:
             raise Exception("Không thể khởi tạo Chrome driver")
 
-        drive_upload_results = []
-        download_results = []
-        # 1. Trích xuất thông tin từ files
-        extracted_results, cached_extracted_files = extract_files_info(files)
-
-        # Lấy tax_number từ kết quả đầu tiên
-        if not extracted_results:
-            raise ValueError("Không có dữ liệu được trích xuất")
-
-        tax_number = extracted_results[0].get('tax_number')
-        if not tax_number:
-            raise ValueError("Không tìm thấy tax_number trong dữ liệu trích xuất")
-        # Thực hiện đăng nhập
-        login_success = handle_login_process(driver, tax_number)
-        if not login_success:
-            raise Exception(f"Không thể đăng nhập với MST {tax_number}")
-
         # Truy cập trang tìm kiếm
         if not ChromeManager.wait_for_page_load(driver, "http://thuphi.haiphong.gov.vn:8222/danh-sach-tra-cuu-bien-lai-dien-tu"):
             raise Exception("Không thể truy cập trang tìm kiếm")
@@ -159,6 +142,15 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                 if table_loaded:
                     break
             time.sleep(0.5)
+
+        drive_upload_results = []
+        download_results = []
+        # 1. Trích xuất thông tin từ files
+        extracted_results, cached_extracted_files = extract_files_info(files)
+
+        # Lấy tax_number từ kết quả đầu tiên
+        if not extracted_results:
+            raise ValueError("Không có dữ liệu được trích xuất")
 
         matched_results = []
         unmatched_results = extracted_results.copy()
@@ -309,7 +301,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             success_count = process_matched_results(driver, matched_results, extracted_results)
 
         download_results.append({
-            'tax_number': tax_number,
             'status': 'success' if success_count > 0 else 'error',
             'customs_count': len(extracted_results),
             'success_count': success_count
@@ -493,91 +484,3 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
 
     return success_count
 
-
-def get_resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
-def handle_login_process(driver, username):
-    """
-    Xử lý quá trình đăng nhập với MST cho trước
-
-    Args:
-        driver: WebDriver instance
-        tax_number: Mã số thuế dùng để đăng nhập
-
-    Returns:
-        bool: True nếu đăng nhập thành công, False nếu thất bại
-
-    Raises:
-        Exception: Nếu không thể đăng nhập sau khi thử
-    """
-    # Default fallback credentials
-    login_username = "0303482440"
-    login_password = "@Mst0303482440"
-
-    # Try to load accounts from accounts.json
-    try:
-        # Thử load file gốc trong development
-        accounts_path = 'accounts.json'
-        if not os.path.exists(accounts_path):
-            # Trong production,
-            accounts_path = get_resource_path(accounts_path)
-
-        if os.path.exists(accounts_path):
-            with open(accounts_path, 'r') as f:
-                accounts = json.load(f)
-            # Get random account
-            account = random.choice(accounts)
-            login_username = account['username']
-            login_password = account['password']
-            print(f"Sử dụng tài khoản ngẫu nhiên: {login_username}")
-        else:
-            print(f"Không tìm thấy file accounts tại {accounts_path}")
-            print(f"Sử dụng tài khoản mặc định: {login_username}")
-    except Exception as e:
-        print(f"Lỗi khi đọc file accounts: {str(e)}")
-        print(f"Sử dụng tài khoản mặc định: {login_username}")
-
-    # Khởi tạo WebDriverWait với timeout dài hơn
-    long_wait = WebDriverWait(driver, 120)  # 2 phút
-    short_wait = WebDriverWait(driver, 2)   # 2 giây
-
-    # Kiểm tra URL hiện tại
-    current_url = driver.current_url
-    is_login_page = "dang-nhap" in current_url
-    is_blank_page = current_url in ["about:blank", "chrome://newtab/"]
-
-    # Chỉ mở tab mới nếu không phải trang login hoặc trang trống
-    if not (is_login_page or is_blank_page):
-        driver.execute_script("window.open('about:blank', '_blank');")
-        driver.switch_to.window(driver.window_handles[-1])
-
-    # Login process
-    login_success = False
-
-    cookies_loaded = CookieManager.load_cookies(driver, username)
-    if cookies_loaded:
-        if ChromeManager.wait_for_page_load(driver, ChromeManager.HOME_URL):
-            try:
-                long_wait.until(lambda d: ChromeManager.is_page_loaded(d))
-                login_success = "dang-nhap" not in driver.current_url
-            except:
-                print("Timeout khi đợi trang Home load hoàn tất")
-
-    if not login_success:
-        if ChromeManager.wait_for_page_load(driver, ChromeManager.LOGIN_URL):
-            long_wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-            if ChromeManager.fill_login_info(driver, login_username, login_password):
-                login_success = True
-
-    if not login_success:
-        raise Exception(f"Không thể đăng nhập với MST {username}")
-
-    return login_success

@@ -93,7 +93,7 @@ def prepare_sensitive_files():
 def build_application(show_console=True):
     """Build the application for current platform"""
     # Define main file and data files
-    main_file = 'test_batch_process.py'
+    main_file = 'pdf_processor.py'
 
     # Prepare icon
     icon_path = prepare_icon()

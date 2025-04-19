@@ -120,11 +120,56 @@ class ChromeManager:
                 # Nếu cần đăng nhập tự động
                 if auto_login and login_credentials:
                     try:
-                        # Truy cập trang đăng nhập
-                        if ChromeManager.wait_for_page_load(driver, ChromeManager.LOGIN_URL):
-                            # Đợi form đăng nhập xuất hiện
-                            wait = WebDriverWait(driver, 30)
-                            wait.until(EC.presence_of_element_located((By.ID, "form-username")))
+                        # Xóa cookies của domain trước khi đăng nhập
+                        # Truy cập trang chủ của domain để có thể xóa cookies
+                        base_url = "http://thuphi.haiphong.gov.vn:8222"
+
+                        # Thêm xử lý lỗi và retry cho việc truy cập URL
+                        max_url_retries = 3
+                        for url_retry in range(max_url_retries):
+                            try:
+                                driver.get(base_url)
+                                # Đợi một chút để đảm bảo trang đã load
+                                time.sleep(1)
+                                print("Xóa cookies của domain trước khi đăng nhập...")
+                                driver.delete_all_cookies()
+                                break
+                            except Exception as e:
+                                if "net::ERR_NAME_NOT_RESOLVED" in str(e) or "net::ERR_CONNECTION_REFUSED" in str(e):
+                                    if url_retry < max_url_retries - 1:
+                                        print(f"Lỗi kết nối đến {base_url}: {str(e)}. Thử lại sau 2 giây... (lần {url_retry + 1}/{max_url_retries})")
+                                        time.sleep(2)  # Đợi 2 giây trước khi thử lại
+                                    else:
+                                        print(f"Không thể kết nối đến {base_url} sau {max_url_retries} lần thử. Tiếp tục với cookies hiện tại.")
+                                else:
+                                    print(f"Lỗi khác khi truy cập {base_url}: {str(e)}")
+                                    if url_retry == max_url_retries - 1:
+                                        print("Tiếp tục với cookies hiện tại.")
+
+                        # Truy cập trang đăng nhập với cơ chế retry
+                        login_page_loaded = False
+                        for login_retry in range(max_url_retries):
+                            try:
+                                if ChromeManager.wait_for_page_load(driver, ChromeManager.LOGIN_URL):
+                                    # Đợi form đăng nhập xuất hiện
+                                    wait = WebDriverWait(driver, 30)
+                                    wait.until(EC.presence_of_element_located((By.ID, "form-username")))
+                                    login_page_loaded = True
+                                    break
+                            except Exception as e:
+                                if "net::ERR_NAME_NOT_RESOLVED" in str(e) or "net::ERR_CONNECTION_REFUSED" in str(e):
+                                    if login_retry < max_url_retries - 1:
+                                        print(f"Lỗi kết nối đến trang đăng nhập: {str(e)}. Thử lại sau 2 giây... (lần {login_retry + 1}/{max_url_retries})")
+                                        time.sleep(2)
+                                    else:
+                                        print(f"Không thể kết nối đến trang đăng nhập sau {max_url_retries} lần thử.")
+                                else:
+                                    print(f"Lỗi khác khi truy cập trang đăng nhập: {str(e)}")
+                                    if login_retry == max_url_retries - 1:
+                                        break
+
+                        # Chỉ tiếp tục nếu đã load được trang đăng nhập
+                        if login_page_loaded:
 
                             # Điền thông tin đăng nhập
                             if ChromeManager.fill_login_info(driver, login_credentials['username'], login_credentials['password']):

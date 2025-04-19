@@ -339,25 +339,35 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             except:
                 pass
 
-def download_invoice_pdf(driver, invoice_info, lock=None):
+def download_invoice_pdf(driver, invoice_info, lock=None, max_retries=2):
     """
-    Download PDF của biên lai từ website
+    Download PDF của biên lai từ website với cơ chế retry và tối ưu hóa
 
     Args:
         driver: WebDriver instance
         invoice_info: Thông tin biên lai cần tải
         lock: Threading lock để đồng bộ hóa truy cập vào driver (cho multithreading)
+        max_retries: Số lần thử lại tối đa nếu gặp lỗi
 
     Returns:
         bytes: Dữ liệu PDF hoặc None nếu có lỗi
     """
+    original_window = None
+    new_handle = None
+
     # Sử dụng lock nếu được cung cấp (cho multithreading)
     if lock:
         lock.acquire()
 
     try:
+        # Lưu lại handle của cửa sổ hiện tại
+        original_window = driver.current_window_handle
+
+        # Tạo URL và mở tab mới
         invoice_url = f"http://thuphi.haiphong.gov.vn:8224/Viewer/HoaDonViewer.aspx?mhd={invoice_info['drive_link']}"
         driver.execute_script(f"window.open('{invoice_url}', '_blank');")
+
+        # Chuyển đến tab mới
         new_handle = driver.window_handles[-1]
         driver.switch_to.window(new_handle)
 
@@ -365,42 +375,102 @@ def download_invoice_pdf(driver, invoice_info, lock=None):
         if lock:
             lock.release()
 
-        start_time = time.time()
-        max_wait_time = 120
-        while time.time() - start_time < max_wait_time:
-            if ChromeManager.is_page_loaded(driver):
-                print_options = {
-                    'landscape': False,
-                    'displayHeaderFooter': False,
-                    'printBackground': True,
-                    'preferCSSPageSize': True,
-                }
-                pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
-                pdf_data = base64.b64decode(pdf['data'])
+        # Thử tải PDF với cơ chế retry
+        for retry in range(max_retries + 1):
+            try:
+                # Đợi trang load xong
+                start_time = time.time()
+                max_wait_time = 60 if retry == 0 else 30  # Giảm thời gian chờ cho các lần thử lại
 
-                if len(pdf_data) < 1000:
-                    print("PDF size too small, retrying...")
-                    time.sleep(1)
-                    continue
+                # Sử dụng polling nhanh hơn để kiểm tra trạng thái trang
+                poll_interval = 0.05
+                while time.time() - start_time < max_wait_time:
+                    if ChromeManager.is_page_loaded(driver):
+                        # Đợi thêm một chút để đảm bảo trang đã render hoàn toàn
+                        time.sleep(0.5)
 
-                return pdf_data
+                        # Cấu hình tối ưu cho PDF
+                        print_options = {
+                            'landscape': False,
+                            'displayHeaderFooter': False,
+                            'printBackground': True,
+                            'preferCSSPageSize': True,
+                            'scale': 1.0,  # Đảm bảo tỷ lệ 1:1
+                        }
 
-            time.sleep(0.1)
+                        # Thực hiện lệnh in PDF
+                        pdf = driver.execute_cdp_cmd("Page.printToPDF", print_options)
+                        pdf_data = base64.b64decode(pdf['data'])
 
-        raise TimeoutException(f"Timeout {max_wait_time}s chờ trang load")
+                        # Kiểm tra kích thước PDF
+                        if len(pdf_data) < 1000:
+                            if retry < max_retries:
+                                print(f"PDF size too small ({len(pdf_data)} bytes), retrying... (lần {retry + 1}/{max_retries})")
+                                time.sleep(1)
+                                # Refresh trang để thử lại
+                                driver.refresh()
+                                break  # Thoát khỏi vòng lặp hiện tại và thử lại
+                            else:
+                                print(f"PDF size too small sau {max_retries} lần thử, bỏ qua")
+                                return None
+
+                        # PDF hợp lệ, trả về kết quả
+                        return pdf_data
+
+                    time.sleep(poll_interval)
+
+                # Nếu hết thời gian chờ và chưa phải lần thử cuối cùng
+                if retry < max_retries:
+                    print(f"Timeout {max_wait_time}s chờ trang load, thử lại... (lần {retry + 1}/{max_retries})")
+                    driver.refresh()  # Refresh trang để thử lại
+                else:
+                    # Đã hết số lần thử
+                    raise TimeoutException(f"Timeout {max_wait_time}s chờ trang load sau {max_retries} lần thử")
+
+            except TimeoutException as te:
+                if retry == max_retries:
+                    raise te  # Nếu đã hết số lần thử, ném lại ngoại lệ
+            except Exception as e:
+                if retry == max_retries:
+                    print(f"Lỗi khi tải PDF (lần {retry + 1}/{max_retries + 1}): {str(e)}")
+                    raise e  # Nếu đã hết số lần thử, ném lại ngoại lệ
+                else:
+                    print(f"Lỗi khi tải PDF (lần {retry + 1}/{max_retries + 1}): {str(e)}, thử lại...")
 
     except Exception as e:
-        print(f"Lỗi không mong đợi khi download biên lai {invoice_info['invoice_no']}: {str(e)}")
+        print(f"Lỗi không mong đợi khi download biên lai {invoice_info.get('invoice_no', '')}: {str(e)}")
         return None
+
     finally:
+        # Đảm bảo đóng đúng tab và trả về tab ban đầu
         try:
             # Sử dụng lock khi đóng tab và chuyển về tab chính
             if lock:
                 lock.acquire()
-            driver.close()
-            driver.switch_to.window(driver.window_handles[0])
+
+            # Kiểm tra xem tab mới có tồn tại không
+            if new_handle and new_handle in driver.window_handles:
+                # Đảm bảo đang ở đúng tab trước khi đóng
+                current_handle = driver.current_window_handle
+                if current_handle != new_handle:
+                    driver.switch_to.window(new_handle)
+                driver.close()
+
+            # Trả về tab ban đầu
+            if original_window and original_window in driver.window_handles:
+                driver.switch_to.window(original_window)
+            else:
+                # Nếu không tìm thấy tab ban đầu, chuyển về tab đầu tiên
+                driver.switch_to.window(driver.window_handles[0])
+
         except Exception as e:
-            print(f"Lỗi khi đóng tab: {str(e)}")
+            print(f"Lỗi khi đóng tab cho biên lai {invoice_info.get('invoice_no', '')}: {str(e)}")
+            # Cố gắng khôi phục bằng cách chuyển về tab đầu tiên
+            try:
+                if driver.window_handles:
+                    driver.switch_to.window(driver.window_handles[0])
+            except:
+                pass
         finally:
             if lock and lock.locked():
                 lock.release()

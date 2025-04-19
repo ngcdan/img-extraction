@@ -24,8 +24,11 @@ import shutil
 import io
 import os
 import sys
+import threading
+import queue
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional, Set
 from pdfminer.high_level import extract_text
 
 from google.oauth2 import service_account
@@ -336,13 +339,31 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
             except:
                 pass
 
-def download_invoice_pdf(driver, invoice_info):
-    """ Download PDF của biên lai từ website """
+def download_invoice_pdf(driver, invoice_info, lock=None):
+    """
+    Download PDF của biên lai từ website
+
+    Args:
+        driver: WebDriver instance
+        invoice_info: Thông tin biên lai cần tải
+        lock: Threading lock để đồng bộ hóa truy cập vào driver (cho multithreading)
+
+    Returns:
+        bytes: Dữ liệu PDF hoặc None nếu có lỗi
+    """
+    # Sử dụng lock nếu được cung cấp (cho multithreading)
+    if lock:
+        lock.acquire()
+
     try:
         invoice_url = f"http://thuphi.haiphong.gov.vn:8224/Viewer/HoaDonViewer.aspx?mhd={invoice_info['drive_link']}"
         driver.execute_script(f"window.open('{invoice_url}', '_blank');")
         new_handle = driver.window_handles[-1]
         driver.switch_to.window(new_handle)
+
+        # Giải phóng lock sau khi đã mở tab mới để các thread khác có thể tiếp tục
+        if lock:
+            lock.release()
 
         start_time = time.time()
         max_wait_time = 120
@@ -373,10 +394,16 @@ def download_invoice_pdf(driver, invoice_info):
         return None
     finally:
         try:
+            # Sử dụng lock khi đóng tab và chuyển về tab chính
+            if lock:
+                lock.acquire()
             driver.close()
             driver.switch_to.window(driver.window_handles[0])
-        except:
-            pass
+        except Exception as e:
+            print(f"Lỗi khi đóng tab: {str(e)}")
+        finally:
+            if lock and lock.locked():
+                lock.release()
 
 def process_and_upload_invoices_batch(invoice_batch):
     """
@@ -424,18 +451,21 @@ def process_and_upload_invoices_batch(invoice_batch):
         print(f"Lỗi khi xử lý batch: {str(e)}")
         return False
 
-def process_matched_results(driver, matched_results, extracted_results, batch_size=10):
+def process_matched_results(driver, matched_results, extracted_results, batch_size=10, max_workers=3):
     """
     Xử lý danh sách các biên lai đã match theo batch và di chuyển file thành công
+    Sử dụng đa luồng để tải nhiều PDF cùng lúc và di chuyển file song song
 
     Args:
         driver: WebDriver instance
         matched_results: List các biên lai đã match
         extracted_results: List các kết quả trích xuất ban đầu
         batch_size: Số lượng file xử lý mỗi batch
+        max_workers: Số lượng worker tối đa cho ThreadPoolExecutor
     """
     success_count = 0
-    current_batch = []
+    result_queue = queue.Queue()  # Hàng đợi để lưu kết quả tải xuống
+    driver_lock = threading.Lock()  # Lock để đồng bộ hóa truy cập vào driver
 
     # Get directories
     customs_dir = get_default_customs_dir()
@@ -449,12 +479,9 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
         if result.get('customs_number') and result.get('source_file')
     }
 
-    # Download all PDFs first
-    for invoice_info in matched_results:
-        pdf_data = download_invoice_pdf(driver, invoice_info)
-        if pdf_data:
-
-            # Move source PDF file if successful
+    # Hàm di chuyển file nguồn sang thư mục success
+    def move_source_file(invoice_info):
+        try:
             customs_no = invoice_info.get('custom_no')
             if customs_no and customs_no in customs_to_file:
                 source_file = customs_to_file[customs_no]
@@ -462,25 +489,77 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
                 source_path = os.path.join(customs_dir, source_file)
                 dest_path = os.path.join(success_dir, source_file)
 
-                try:
-                    if os.path.exists(source_path):
-                        shutil.move(source_path, dest_path)
-                        print(f"Đã chuyển file {source_file} sang thư mục success")
-                except Exception as e:
-                    print(f"Lỗi khi di chuyển file {source_file}: {str(e)}")
+                if os.path.exists(source_path):
+                    shutil.move(source_path, dest_path)
+                    print(f"Đã chuyển file {source_file} sang thư mục success")
+                    return True
+            return False
+        except Exception as e:
+            print(f"Lỗi khi di chuyển file {invoice_info.get('custom_no')}: {str(e)}")
+            return False
 
-            current_batch.append((invoice_info, pdf_data))
+    # Hàm tải PDF cho một invoice
+    def download_and_process_invoice(invoice_info):
+        pdf_data = download_invoice_pdf(driver, invoice_info, driver_lock)
+        if pdf_data:
+            # Đưa kết quả vào hàng đợi
+            result_queue.put((invoice_info, pdf_data))
             print(f"Đã download biên lai {invoice_info['invoice_no']}")
-            # Process batch when reaching batch_size
-            if len(current_batch) >= batch_size:
-                if process_and_upload_invoices_batch(current_batch):
-                    success_count += len(current_batch)
-                current_batch = []
 
-    # Process remaining files
+            # Di chuyển file nguồn trong thread riêng
+            move_thread = threading.Thread(target=move_source_file, args=(invoice_info,))
+            move_thread.daemon = True
+            move_thread.start()
+
+            return True
+        return False
+
+    # Sử dụng ThreadPoolExecutor để tải nhiều PDF cùng lúc
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit tất cả các tác vụ tải xuống
+        futures = [executor.submit(download_and_process_invoice, invoice_info)
+                  for invoice_info in matched_results]
+
+        # Xử lý các kết quả khi hoàn thành
+        current_batch = []
+        completed_count = 0
+
+        # Xử lý các kết quả khi chúng được thêm vào hàng đợi
+        while completed_count < len(futures):
+            try:
+                # Kiểm tra xem có kết quả nào trong hàng đợi không
+                while not result_queue.empty():
+                    result = result_queue.get(block=False)
+                    current_batch.append(result)
+
+                    # Xử lý batch khi đạt kích thước
+                    if len(current_batch) >= batch_size:
+                        if process_and_upload_invoices_batch(current_batch):
+                            success_count += len(current_batch)
+                        current_batch = []
+
+                # Kiểm tra các future đã hoàn thành
+                completed_count = sum(1 for f in futures if f.done())
+
+                # Ngủ một chút để tránh sử dụng CPU quá mức
+                time.sleep(0.1)
+
+            except queue.Empty:
+                # Hàng đợi trống, tiếp tục kiểm tra
+                time.sleep(0.5)
+
+    # Xử lý các kết quả còn lại trong hàng đợi
+    while not result_queue.empty():
+        result = result_queue.get()
+        current_batch.append(result)
+
+    # Xử lý các file còn lại trong batch
     if current_batch:
         if process_and_upload_invoices_batch(current_batch):
             success_count += len(current_batch)
+
+    # Đợi tất cả các thread di chuyển file hoàn thành (tối đa 5 giây)
+    time.sleep(1)
 
     return success_count
 

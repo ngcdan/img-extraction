@@ -280,22 +280,6 @@ class ChromeManager:
         raise Exception(f"Hết thời gian chờ ({max_wait_time}s) - Người dùng chưa đăng nhập thành công")
 
     @staticmethod
-    def save_captcha_and_label(image_data: bytes, captcha_text: str) -> bool:
-        """Lưu captcha và label"""
-        try:
-            from google_drive_utils import upload_captcha_to_drive, append_to_labels_file
-            result = upload_captcha_to_drive(image_data)
-
-            if result['success']:
-                append_result = append_to_labels_file(result['filename'], captcha_text)
-                return append_result['success']
-            return False
-
-        except Exception as e:
-            print(f"Lỗi khi lưu captcha và label: {e}")
-            return False
-
-    @staticmethod
     def wait_for_search_complete(driver: webdriver.Chrome, timeout: int = 30) -> bool:
         """Chờ cho kết quả tìm kiếm hoàn tất và bảng dữ liệu được load
 

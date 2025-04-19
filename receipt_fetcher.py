@@ -32,14 +32,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
-from google_drive_utils import (
-    upload_file_to_drive,
-    DriveService,
-    get_or_create_folder,
-    check_file_exists,
-    append_to_labels_file, batch_upload_to_drive
-)
-
+from google_drive_utils import batch_upload_to_drive
 from google_sheet_utils import batch_append_to_sheet
 
 from pdf_invoice_parser import (

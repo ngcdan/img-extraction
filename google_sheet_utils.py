@@ -10,12 +10,12 @@ from utils import get_resource_path
 
 # Cấu hình chung
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-SERVICE_ACCOUNT_FILE = 'service-account-key.json'
+SERVICE_ACCOUNT_FILE = 'driver-service-account.json'
 SPREADSHEET_ID = '1OWxsCEHLzkVGv2sYheAmrHLeLswgeskGx72Q-Sze2LM'
 HEADER_ROW = [
     'PartnerID', 'PartnerName', 'JobNo', 'HBLNo', 'Custom No',
     'FeeCode', 'FeeName', 'Quantity', 'Unit', 'Amount', 'VAT',
-    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate',  'PartnerID_Inv', 'PartnerName_Inv', 'Source From'
+    'TotalAmount', 'OBH', 'InvoiceNo', 'SeriesNo', 'InvoiceDate',  'PartnerID_Inv', 'PartnerName_Inv', 'Source File'
 ]
 
 class SheetService:
@@ -34,7 +34,7 @@ class SheetService:
             try:
                 cred_path = SERVICE_ACCOUNT_FILE
                 if not os.path.exists(cred_path):
-                    cred_path = get_resource_path('data2.bin')
+                    cred_path = get_resource_path('data1.bin')
 
                 if not os.path.exists(cred_path):
                     raise FileNotFoundError(f"Không tìm thấy file credentials")
@@ -291,75 +291,6 @@ def execute_append(sheet, sheet_name, values):
         body=body
     ).execute()
 
-def append_to_google_sheet_new(extracted_info):
-    try:
-        sheet_instance = SheetService.get_instance()
-        sheet = sheet_instance.service.spreadsheets()
-
-        # Lấy ngày từ extracted_info
-        date_str = extracted_info.get('ngay', '')
-        if not date_str:
-            print("Không tìm thấy thông tin ngày")
-            return False
-
-        # Lấy hoặc tạo sheet theo ngày
-        sheet_name = sheet_instance.get_or_create_sheet(date_str)
-
-        fixed_data = {
-            'service_code': 'CL015567',
-            'vendor': 'SO GTVT- SO GIAO THONG VAN TAI',
-            'charge_code': 'B_CSHT',
-            'description': 'INFRASTRUCTURE FEES',
-            'unit': 'shipment'
-        }
-
-        # Lấy số dòng hiện tại của sheet cụ thể
-        try:
-            result = sheet.values().get(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f"'{sheet_name}'!A:A"
-            ).execute()
-            current_row = len(result.get('values', []))
-        except HttpError as e:
-            print(f"Lỗi khi đọc dữ liệu từ sheet {sheet_name}: {str(e)}")
-            return False
-
-        values = []
-        row_data = [
-            fixed_data['service_code'],
-            fixed_data['vendor'],
-            extracted_info.get('jobId', ''),
-            extracted_info.get('hawb', ''),
-            f"'{extracted_info.get('custom_no', '')}",
-            fixed_data['charge_code'],
-            fixed_data['description'],
-            1,
-            fixed_data['unit'],
-            extracted_info.get('total_amount', ''),
-            '', # tax
-            extracted_info.get('total_amount', ''),
-            extracted_info.get('tax_number', '') != '0303482440',
-            f"'{extracted_info.get('invoice_no', '').zfill(8)}",
-            extracted_info.get('seriesNo', ''),
-            extracted_info.get('ngay', ''),
-            '',
-            extracted_info.get('partner_invoice_name'),
-            extracted_info.get('source_from'),
-        ]
-        values.append(row_data)
-
-        try:
-            execute_append(sheet, sheet_name, values)
-            print(f"Đã thêm 1 dòng vào sheet {sheet_name}")
-            return True
-        except Exception as e:
-            print(f"Lỗi sau 3 lần thử append dữ liệu vào sheet {sheet_name}: {str(e)}")
-            return False
-
-    except Exception as e:
-        print(f"Lỗi không mong đợi: {str(e)}")
-        return False
-
 def batch_append_to_sheet(rows):
     """
     Append nhiều dòng vào sheet cùng lúc
@@ -409,6 +340,7 @@ def batch_append_to_sheet(rows):
                     row.get('ngay', ''),
                     row.get('partner_invoice_id', ''),
                     row.get('partner_invoice_name'),
+                    row.get('source_file'),
                 ]
                 values.append(row_data)
 

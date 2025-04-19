@@ -16,11 +16,11 @@ downloaded_pdfs/
 training_captchas/
 
 # Google API credentials
-# driver-key.json
-# *-service-account.json
-# client_secret*.json
-# credentials.json
-# token.json
+ driver-key.json
+ *-service-account.json
+ client_secret*.json
+ credentials.json
+ token.json
 *.pickle
 
 # Byte-compiled / optimized / DLL files
@@ -94,3 +94,4 @@ Desktop.ini
 *.bak
 *.swp
 *~
+

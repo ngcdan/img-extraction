@@ -65,8 +65,9 @@ def prepare_sensitive_files():
     """
     sensitive_files = {
         'driver-service-account.json': 'data1.bin',
-        'service-account-key.json': 'data2.bin',
-        'accounts.json': 'accounts.json'
+        'driver-service-account.json': 'data2.bin',
+        'accounts.json': 'accounts.json',
+        '.env': 'config.bin'
         # Thêm các file nhạy cảm khác vào đây
     }
 

@@ -40,7 +40,7 @@ from google_drive_utils import (
     append_to_labels_file, batch_upload_to_drive
 )
 
-from google_sheet_utils import append_to_google_sheet_new, batch_append_to_sheet
+from google_sheet_utils import batch_append_to_sheet
 
 from pdf_invoice_parser import (
     extract_text_from_pdf,
@@ -51,6 +51,11 @@ from pdf_invoice_parser import (
 from utils import get_default_customs_dir, parse_date, format_date
 from cookie_manager import CookieManager
 from chrome_manager import ChromeManager
+from custom_api_client import (
+    CustomApiClient,
+    ApiCredentials,
+    parse_response
+)
 
 def extract_files_info(files: List[str]) -> Tuple[List[Dict], Dict]:
     """
@@ -133,9 +138,6 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         tax_number = extracted_results[0].get('tax_number')
         if not tax_number:
             raise ValueError("Không tìm thấy tax_number trong dữ liệu trích xuất")
-
-        print(f"\nThực hiện đăng nhập với MST: {tax_number}")
-
         # Thực hiện đăng nhập
         login_success = handle_login_process(driver, tax_number)
         if not login_success:
@@ -149,34 +151,19 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
         wait = WebDriverWait(driver, 60)
         short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
 
-        print("\n=== Debug loading state ===")
-        print(f"Current URL: {driver.current_url}")
-
         # Chờ bảng dữ liệu load xong
         try:
-            print("Checking for preloader...")
             preloader = short_wait.until(EC.presence_of_element_located((By.CLASS_NAME, "preloader-container")))
-            print("Found preloader element")
         except:
-            print("No preloader found or already disappeared")
             pass
 
         start_time = time.time()
-        iteration = 0
         while time.time() - start_time < 60:  # Tối đa 60 giây
-            iteration += 1
-            print(f"\nIteration {iteration} - Time elapsed: {time.time() - start_time:.1f}s")
-
             preloader_exists = driver.find_elements(By.CLASS_NAME, "preloader-container")
-            print(f"Preloader exists: {bool(preloader_exists)}")
 
             if not preloader_exists:
-                print("Checking if table is loaded with data...")
                 table_loaded = ChromeManager.is_table_loaded_with_data(driver, short_wait)
-                print(f"Table loaded status: {table_loaded}")
-
                 if table_loaded:
-                    print("Table successfully loaded with data!")
                     break
             time.sleep(0.5)
 
@@ -285,98 +272,46 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
         # Xử lý các kết quả đã match
         if matched_results:
-            # Query database để lấy thêm thông tin
+            # Query database để lấy thêm thông tin từ API
             customs_numbers = [result['custom_no'] for result in matched_results]
 
             try:
-                # Kết nối database sử dụng pyodbc
-                conn = pyodbc.connect(
-                    'DRIVER={ODBC Driver 18 for SQL Server};'
-                    'SERVER=of1.beelogistics.com,34541;'
-                    'DATABASE=BEE_DB;'
-                    'UID=devhph;'
-                    'PWD=Hph@dev!@#123;'
-                    'TrustServerCertificate=yes;'
-                )
+                api_client = CustomApiClient(ApiCredentials())
+                api_result = api_client.fetch_customs_data(customs_numbers)
+                if api_result.status == "OK":
+                    db_results = parse_response(api_result.data)
+                    db_data = {}
+                    for customs_no in customs_numbers:
+                        search_customs_no = customs_no
+                        if len(customs_no) == 12:
+                            search_customs_no = customs_no[:-1]
+                        matching_row = next(
+                            (row for row in db_results if search_customs_no in row['customs_no']),
+                            None
+                        )
 
-                # Tạo điều kiện LIKE cho mỗi customs number
-                like_conditions = []
-                params = []
-                for customs_no in customs_numbers:
-                    like_conditions.append("cs.TKSo LIKE ?")
-                    params.append(f"%{customs_no}%")
+                        if matching_row:
+                            db_data[customs_no] = {
+                                'jobId': str(matching_row['TransID']),
+                                'hawb': matching_row['hawb'],
+                                'partner_id': matching_row['PartnerID'],
+                                'partner_name': matching_row['PartnerName3']
+                            }
 
-                # Chuẩn bị query với multiple LIKE conditions
-                query = f"""
-                    SELECT
-                        td.TransID,
-                        td.HWBNO as hawb,
-                        cs.TKSo as customs_no,
-                        p.PartnerID,
-                        p.PartnerName3
-                    FROM TransactionDetails td
-                    JOIN CustomsDeclaration cs ON cs.MasoTK = td.CustomsID
-                    JOIN Partners p ON p.PartnerID = td.ShipperID
-                    WHERE {' OR '.join(like_conditions)}
-                    ORDER BY td.TransID
-                """
-
-                # Thực hiện query
-                cursor = conn.cursor()
-                cursor.execute(query, params)
-
-                # Lấy tên cột
-                columns = [column[0] for column in cursor.description]
-
-                # Fetch kết quả dạng dictionary
-                db_results = []
-                for row in cursor.fetchall():
-                    db_results.append(dict(zip(columns, row)))
-
-                # Convert to dict for easier lookup
-                db_data = {}
-                for customs_no in customs_numbers:
-                    # Check if customsNumber has 12 characters and remove the last one
-                    search_customs_no = customs_no
-                    if len(customs_no) == 12:
-                        search_customs_no = customs_no[:-1]
-
-                    # Tìm row đầu tiên chứa customs_no
-                    matching_row = next(
-                        (row for row in db_results if search_customs_no in row['customs_no']),
-                        None
-                    )
-
-                    if matching_row:
-                        db_data[customs_no] = {
-                            'jobId': str(matching_row['TransID']),
-                            'hawb': matching_row['hawb'],
-                            'partner_id': matching_row['PartnerID'],
-                            'partner_name': matching_row['PartnerName3']
-                        }
-
-                # Merge data vào matched_results
-                for result in matched_results:
-                    customs_no = result['custom_no']
-                    if customs_no in db_data:
-                        result.update({
-                            'jobId': db_data[customs_no]['jobId'],
-                            'hawb': db_data[customs_no]['hawb'],
-                            'partner_invoice_id': db_data[customs_no]['partner_id'],
-                            'partner_invoice_name': db_data[customs_no]['partner_name']
-                        })
-                    else:
-                        print(f"Không tìm thấy dữ liệu trong DB cho customs number: {customs_no}")
-
-                cursor.close()
-                conn.close()
+                    for result in matched_results:
+                        customs_no = result['custom_no']
+                        if customs_no in db_data:
+                            result.update({
+                                'jobId': db_data[customs_no]['jobId'],
+                                'hawb': db_data[customs_no]['hawb'],
+                                'partner_invoice_id': db_data[customs_no]['partner_id'],
+                                'partner_invoice_name': db_data[customs_no]['partner_name']
+                            })
+                        else:
+                            print(f"Không tìm thấy dữ liệu trong API cho customs number: {customs_no}")
 
             except Exception as e:
-                print(f"Lỗi khi query database: {str(e)}")
-                if 'cursor' in locals():
-                    cursor.close()
-                if 'conn' in locals():
-                    conn.close()
+                print(f"Lỗi khi query API: {str(e)}")
 
             success_count = process_matched_results(driver, matched_results, extracted_results)
 
@@ -478,7 +413,7 @@ def process_and_upload_invoices_batch(invoice_batch):
                 job_id = invoice_info['jobId'].strip()
                 if '/' in job_id:
                     job_id = job_id.split('/')[0]
-                job_id_prefix = f"{job_id}_"
+                job_id_prefix = f"{job_id}-"
 
             filename = f"{job_id_prefix}CSHT{invoice_info['invoice_no']}.pdf"
 
@@ -534,8 +469,6 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
     for invoice_info in matched_results:
         pdf_data = download_invoice_pdf(driver, invoice_info)
         if pdf_data:
-            current_batch.append((invoice_info, pdf_data))
-            print(f"Đã download biên lai {invoice_info['invoice_no']}")
 
             # Move source PDF file if successful
             customs_no = invoice_info.get('custom_no')
@@ -552,6 +485,8 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
                 except Exception as e:
                     print(f"Lỗi khi di chuyển file {source_file}: {str(e)}")
 
+            current_batch.append((invoice_info, pdf_data))
+            print(f"Đã download biên lai {invoice_info['invoice_no']}")
             # Process batch when reaching batch_size
             if len(current_batch) >= batch_size:
                 if process_and_upload_invoices_batch(current_batch):

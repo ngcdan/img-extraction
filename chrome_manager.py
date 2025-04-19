@@ -364,7 +364,6 @@ class ChromeManager:
 
                 if accounts and len(accounts) > 0:
                     account = random.choice(accounts)
-                    print(f"Sử dụng tài khoản ngẫu nhiên: {account['username']} | Password: {account['password']}")
                     return account
                 else:
                     print("File accounts.json không có dữ liệu")
@@ -372,6 +371,4 @@ class ChromeManager:
                 print(f"Không tìm thấy file accounts tại {accounts_path}")
         except Exception as e:
             print(f"Lỗi khi đọc file accounts: {str(e)}")
-
-        print(f"Sử dụng tài khoản mặc định: {default_credentials['username']} | Password: {default_credentials['password']}")
         return default_credentials

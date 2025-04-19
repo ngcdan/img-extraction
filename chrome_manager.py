@@ -5,6 +5,8 @@ import json
 import random
 import platform
 import logging
+import warnings
+import os.path
 from typing import Optional, Tuple, Dict, Any, List
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -16,6 +18,18 @@ from webdriver_manager.chrome import ChromeDriverManager
 from cookie_manager import CookieManager
 
 logger = logging.getLogger(__name__)
+
+# Tắt các warning và log không cần thiết
+warnings.filterwarnings("ignore")
+
+# Tắt các log của TensorFlow
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # 0=DEBUG, 1=INFO, 2=WARNING, 3=ERROR
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
+# Tắt các log của Selenium
+logging.getLogger('selenium').setLevel(logging.ERROR)
+logging.getLogger('urllib3').setLevel(logging.ERROR)
+logging.getLogger('webdriver_manager').setLevel(logging.ERROR)
 
 
 def get_resource_path(relative_path: str) -> str:
@@ -51,11 +65,18 @@ class ChromeManager:
                 # Thiết lập options tối thiểu cho Chrome để mở nhanh nhất
                 chrome_options = webdriver.ChromeOptions()
 
+                # Tắt các log và warning
+                chrome_options.add_argument('--log-level=3')  # Chỉ hiển thị lỗi nghiêm trọng
+                chrome_options.add_argument('--silent')  # Chế độ im lặng
+                chrome_options.add_argument('--disable-logging')  # Tắt logging
+                chrome_options.add_argument('--disable-dev-shm-usage')  # Tránh lỗi shared memory
+                chrome_options.add_argument('--disable-gpu')  # Tắt GPU (giúp tránh nhiều warning)
+                chrome_options.add_argument('--disable-infobars')  # Tắt infobar
+                chrome_options.add_argument('--disable-breakpad')  # Tắt crash reporting
                 # Các tham số cần thiết để tăng tốc độ khởi động
                 chrome_options.add_argument('--no-first-run')
                 chrome_options.add_argument('--no-default-browser-check')
                 chrome_options.add_argument('--no-sandbox')
-                chrome_options.add_argument('--disable-dev-shm-usage')
                 chrome_options.add_argument('--disable-extensions')
                 chrome_options.add_argument('--disable-popup-blocking')
                 chrome_options.add_argument('--disable-notifications')
@@ -63,17 +84,24 @@ class ChromeManager:
                 chrome_options.add_argument('--disable-background-timer-throttling')
                 chrome_options.add_argument('--disable-backgrounding-occluded-windows')
 
-                # Tắt các popup và tối ưu performance
+                # Tắt các popup, log và tối ưu performance
                 prefs = {
                     "credentials_enable_service": False,
                     "profile.password_manager_enabled": False,
                     "browser.startup.homepage": "about:blank",
-                    "browser.startup.page": 0
+                    "browser.startup.page": 0,
+                    "profile.default_content_setting_values.notifications": 2,  # Tắt thông báo
+                    "profile.exit_type": "Normal",  # Tránh thông báo crash
+                    "browser.enable_automation": False,  # Tránh thông báo automation
+                    "devtools.preferences.deviceDiscoveryEnabled": False,  # Tắt device discovery
+                    "devtools.preferences.currentDockState": "\"undocked\"",  # Tránh mở DevTools
+                    "download.prompt_for_download": False,  # Tắt hộp thoại download
+                    "safebrowsing.enabled": False  # Tắt safe browsing warnings
                 }
                 chrome_options.add_experimental_option("prefs", prefs)
 
-                # Tránh phát hiện automation
-                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                # Tránh phát hiện automation và tắt logging
+                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
 
                 # Khởi tạo service và driver

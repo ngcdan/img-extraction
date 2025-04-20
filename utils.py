@@ -2,6 +2,7 @@ import os
 import sys
 import platform
 from datetime import datetime
+import base64, json
 
 def get_default_customs_dir():
     """Lấy đường dẫn thư mục customs mặc định trên Desktop"""
@@ -45,3 +46,43 @@ def parse_date(date_str):
 def format_date(date_obj):
     """Chuyển đổi đối tượng datetime thành chuỗi 'dd/mm/yyyy'"""
     return date_obj.strftime('%d/%m/%Y') if date_obj else None
+
+
+class IOUtil:
+    @staticmethod
+    def read_bytes(file_path: str):
+        data: bytes|None = None;
+        with open(file_path, mode='rb') as file: # b is important -> binary
+            data = file.read()
+            file.close();
+        return data;
+
+    @staticmethod
+    def read_text(file_path: str, encoding: str = 'utf-8'):
+        data: str|None = None;
+        with open(file_path, mode='r', encoding=encoding) as file: # b is important -> binary
+            data = file.read()
+            file.close();
+        return data;
+
+    @staticmethod
+    def read_json_as_dict(file_path: str, encoding: str = 'utf-8'):
+        data: str = IOUtil.read_text(file_path, encoding);
+        obj = json.loads(data);
+        return obj;
+
+
+class Base64Util:
+    @staticmethod
+    def encode(data: bytes):
+        encoded_string = base64.b64encode(data)
+        base64_string = encoded_string.decode('ascii')
+        return base64_string
+
+    @staticmethod
+    def decode(string: str|None):
+        if not string:
+            return bytes(0);
+        data = string.encode('ascii')
+        decode_data = base64.b64decode(data);
+        return decode_data;

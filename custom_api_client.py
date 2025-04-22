@@ -103,8 +103,13 @@ class CustomApiClient:
 
     def fetch_customs_data(self, customs_numbers: List[str]) -> ApiResponse:
         request_data = {
-            "resourceName": API_CONFIG["RESOURCE_NAME"],
             "customsNumbers": customs_numbers
+        }
+        return self._make_request(ApiEndpoints.RESOURCE, request_data)
+
+    def fetch_customs_location_by_name(self, custom_name: str) -> ApiResponse:
+        request_data = {
+            "name": custom_name
         }
         return self._make_request(ApiEndpoints.RESOURCE, request_data)
 
@@ -161,21 +166,24 @@ def main():
     client = CustomApiClient()
 
     # Example customs numbers
-    test_customs_numbers = ["1234567890", "106983609350", "106983665130"]
+    # test_customs_numbers = ["1234567890", "106983609350", "106983665130"]
+    custom_name = "HQTTHUAN"
 
     # Fetch data
-    result = client.fetch_customs_data(test_customs_numbers)
+    result = client.fetch_customs_location_by_name(custom_name)
 
     # Process results
     if result.status == "OK":
         records = parse_response(result.data)
+        print(json.dumps(records, indent=2, ensure_ascii=False))
+
         print("\nProcessed Records:")
-        for record in records:
-            print(f"\nTransaction: {record['TransID']}")
-            print(f"HAWB: {record['hawb']}")
-            print(f"Customs No: {record['customs_no']}")
-            print(f"Partner: {record['PartnerName3']}")
-            print("-" * 50)
+        # for record in records:
+        #     print(f"\nTransaction: {record['TransID']}")
+        #     print(f"HAWB: {record['hawb']}")
+        #     print(f"Customs No: {record['customs_no']}")
+        #     print(f"Partner: {record['PartnerName3']}")
+        #     print("-" * 50)
     else:
         print(f"\nError: {result.message}")
 

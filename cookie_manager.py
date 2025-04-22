@@ -5,8 +5,8 @@ from selenium.webdriver.remote.webdriver import WebDriver
 
 class CookieManager:
     COOKIES_DIR = 'cookies'
-    TARGET_DOMAIN = "thuphi.haiphong.gov.vn"
-    BASE_URL = "http://thuphi.haiphong.gov.vn:8222"
+    TARGET_DOMAIN = "https://pus.customs.gov.vn"
+    BASE_URL = "https://pus.customs.gov.vn"
 
     def __init__(self):
         if not os.path.exists(self.COOKIES_DIR):

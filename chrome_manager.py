@@ -65,6 +65,24 @@ class ChromeManager:
                 # Thiết lập options tối thiểu cho Chrome để mở nhanh nhất
                 chrome_options = webdriver.ChromeOptions()
 
+                # Thêm chế độ ẩn danh
+                chrome_options.add_argument('--incognito')
+
+                # Thêm các options để ngăn redirect và tracking
+                chrome_options.add_argument('--disable-web-security')
+                chrome_options.add_argument('--disable-session-cookies')
+                chrome_options.add_argument('--disable-client-side-phishing-detection')
+
+                # Thêm experimental options
+                prefs = {
+                    "profile.default_content_settings.cookies": 2,  # Block all cookies
+                    "profile.block_third_party_cookies": True,
+                    "session.restore_on_startup": 4,  # Don't restore session
+                    "credentials_enable_service": False,
+                    "profile.password_manager_enabled": False,
+                }
+                chrome_options.add_experimental_option("prefs", prefs)
+
                 # Tắt các log và warning
                 chrome_options.add_argument('--log-level=3')  # Chỉ hiển thị lỗi nghiêm trọng
                 chrome_options.add_argument('--silent')  # Chế độ im lặng
@@ -78,7 +96,7 @@ class ChromeManager:
                 chrome_options.add_argument('--no-default-browser-check')
                 chrome_options.add_argument('--no-sandbox')
                 chrome_options.add_argument('--disable-extensions')
-                chrome_options.add_argument('--disable-popup-blocking')
+                # chrome_options.add_argument('--disable-popup-blocking')
                 chrome_options.add_argument('--disable-notifications')
                 chrome_options.add_argument('--disable-background-networking')
                 chrome_options.add_argument('--disable-background-timer-throttling')

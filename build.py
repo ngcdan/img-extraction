@@ -65,15 +65,21 @@ a = Analysis(
         ('downloads', 'downloads'),
         ('static', 'static')
     ],
-    hiddenimports=[
-        'pdfkit',
-        'PIL',
-        'selenium',
-        'pandas',
-        'openpyxl',
-        'tenacity',
-        'cffi'
-    ],
+   hiddenimports=[
+       'pdfkit',
+       'PIL',
+       'selenium',
+       'pandas',
+       'openpyxl',
+       'tenacity',
+       'cffi',
+       'selenium.webdriver',
+       'selenium.webdriver.common.by',
+       'selenium.webdriver.support.ui',
+       'selenium.webdriver.support.expected_conditions',
+       'selenium.common.exceptions',
+       'selenium.webdriver.common.action_chains'
+   ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['hook-runtime.py'],  # Add runtime hook here

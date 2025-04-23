@@ -114,6 +114,9 @@ class ChromeManager:
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
 
+                # Enable Performance Logging
+                chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+
                 # Khởi tạo service và driver
                 # Sử dụng cách tiếp cận nhanh hơn để tìm ChromeDriver
                 try:

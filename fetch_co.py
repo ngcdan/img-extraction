@@ -3,6 +3,7 @@ from cookie_manager import CookieManager
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 import time
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException
@@ -13,55 +14,44 @@ import json
 from datetime import datetime
 import os
 import sys
-import pdfkit
+from pdf_generator import PDFGenerator
 from custom_api_client import CustomApiClient, parse_response
+
+pdf_generator = PDFGenerator()
 
 def access_page_with_retry(driver, url, max_retries=3, delay_between_retries=5):
     for retry in range(max_retries):
         try:
-            # Lưu handle của cửa sổ hiện tại
-            original_window = driver.current_window_handle
-
-            # Thử mở URL trong tab hiện tại trước
+            print(f"Lần {retry + 1}: Đang truy cập {url}")
             driver.get(url)
-            time.sleep(2)  # Đợi để kiểm tra lỗi
 
-            # Kiểm tra lỗi 404
-            error_elements = driver.find_elements(By.CSS_SELECTOR, "h2")
-            if any("404" in element.text for element in error_elements):
-                print(f"Lần {retry + 1}: Phát hiện lỗi 404, thử refresh session...")
+            # Kiểm tra URL hiện tại
+            current_url = driver.current_url
+            print(f"URL hiện tại: {current_url}")
 
-                if retry < max_retries - 1:
-                    # Truy cập trang chủ hải quan để refresh session
-                    if refresh_session(driver):
-                        print("Đã refresh session thành công, thử lại...")
-                        # Mở URL trong tab mới
-                        driver.execute_script(f"window.open('{url}', '_blank');")
+            # Kiểm tra các trường hợp cần reload
+            if (current_url == "about:blank" or
+                "ContainerBarcode;jsessionid=" in current_url):
+                print("Phát hiện URL không hợp lệ, đang tải lại trang...")
+                time.sleep(2)  # Chờ 2s trước khi reload
+                driver.get(url)
+                print(f"Đã tải lại trang. URL mới: {driver.current_url}")
 
-                        # Chuyển đến tab mới
-                        new_window = driver.window_handles[-1]
-                        driver.switch_to.window(new_window)
+            # Kiểm tra lại URL sau khi reload
+            if driver.current_url == "about:blank":
+                raise Exception("Trang vẫn trống sau khi reload")
 
-                        time.sleep(delay_between_retries)
-                        continue
-                    else:
-                        print("Không thể refresh session")
-                return False
+            print(f"Lần {retry + 1}: Truy cập thành công")
             return True
 
         except Exception as e:
-            print(f"Lần {retry + 1}: Lỗi - {str(e)}")
+            print(f"Lần {retry + 1}: Lỗi khi truy cập - {str(e)}")
             if retry < max_retries - 1:
-                # Thử refresh session khi gặp lỗi
-                print("Thử refresh session...")
-                if refresh_session(driver):
-                    print("Đã refresh session thành công, thử lại...")
-                    time.sleep(delay_between_retries)
-                    continue
-                else:
-                    print("Không thể refresh session")
-                    time.sleep(delay_between_retries)
-                    continue
+                print(f"Chờ {delay_between_retries}s trước khi thử lại...")
+                time.sleep(delay_between_retries)
+                continue
+            else:
+                print("Đã hết số lần thử")
     return False
 
 def get_base_path():
@@ -90,11 +80,24 @@ def ensure_downloads_dir():
         return None
 
 def refresh_session(driver):
+    """Refresh session by accessing backup URL with minimal waiting"""
     try:
-        driver.get("https://pus.customs.gov.vn/")
-        time.sleep(2)  # Đợi để session được thiết lập
+        print("Truy cập URL backup để lấy session mới...")
+        driver.get("https://pus1.customs.gov.vn/BarcodeContainer/BarcodeContainer.aspx")
+
+        # Chỉ đợi cho đến khi document.readyState là 'complete'
+        WebDriverWait(driver, 10).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+
+        print("Đã lấy session mới thành công")
         return True
-    except:
+
+    except TimeoutException as te:
+        print(f"Timeout khi chờ trang load: {str(te)}")
+        return False
+    except Exception as e:
+        print(f"Lỗi khi refresh session: {str(e)}")
         return False
 
 def format_excel_date(excel_date):
@@ -176,8 +179,8 @@ def main():
         CookieManager.clear_all_cookies_and_sessions(driver)
 
         # Refresh session trước khi bắt đầu
-        if not refresh_session(driver):
-            print("Cảnh báo: Không thể truy cập trang chủ hải quan")
+        # if not refresh_session(driver):
+        #     print("Cảnh báo: Không thể truy cập trang chủ hải quan")
 
         # Truy cập trang với retry được cải thiện
         base_url = "https://pus.customs.gov.vn/faces/ContainerBarcode"
@@ -231,33 +234,48 @@ def main():
             max_attempts = 3  # Số lần thử tối đa
             for attempt in range(max_attempts):
                 try:
+                    # Tạo một list để lưu requests
+                    requests = []
+
+                    # Thiết lập listener cho network requests bằng CDP
+                    def process_browser_logs_for_network_events(logs):
+                        for entry in logs:
+                            log = json.loads(entry["message"])["message"]
+                            if ("Network.responseReceived" in log["method"]
+                                and "ContainerBarcode?Adf-Window-Id=" in log.get("params", {}).get("response", {}).get("url", "")):
+                                return True
+                        return False
+
+                    # Enable network logging
+                    driver.execute_cdp_cmd('Network.enable', {})
+
+                    # Click button để gửi request
                     link = driver.find_element(By.CSS_SELECTOR, "#pt1\\:btngetdata a")
                     actions = ActionChains(driver)
                     actions.move_to_element(link).pause(1).click().perform()
 
+                    # Đợi và kiểm tra response
                     start_time = time.time()
-                    found = False
+                    request_completed = False
 
                     while time.time() - start_time < 10:  # Kiểm tra trong 10 giây
-                        try:
-                            span_element = driver.find_element(By.ID, "pt1:png1")
-                            style_attr = span_element.get_attribute("style")
+                        # Lấy logs từ browser
+                        logs = driver.get_log("performance")
+                        if process_browser_logs_for_network_events(logs):
+                            request_completed = True
+                            time.sleep(2)  # Đợi thêm 2s để đảm bảo dữ liệu đã được render
+                            print("Đã nhận được response thành công, bắt đầu tạo PDF...")
+                            break
+                        time.sleep(0.5)
 
-                            # Kiểm tra nếu không có style attribute hoặc style không chứa display:none
-                            if not style_attr or "display:none" not in style_attr:
-                                found = True
-                                time.sleep(2)
-                                print("Đã phát hiện thông tin hải quan, bắt đầu tạo PDF...")
-                                break
-                        except:
-                            pass
-                        time.sleep(0.5)  # Đợi 0.5 giây trước khi kiểm tra lại
+                    # Disable network logging
+                    driver.execute_cdp_cmd('Network.disable', {})
 
-                    if not found:
+                    if not request_completed:
                         if attempt < max_attempts - 1:
-                            print(f"Lần {attempt + 1}: Không tìm thấy thông tin, thử lại...")
+                            print(f"Lần {attempt + 1}: Không nhận được response thành công, thử lại...")
                             continue
-                        raise Exception("Đã hết thời gian chờ (10s) mà không tìm thấy thông tin hải quan")
+                        raise Exception("Đã hết thời gian chờ (10s) mà không nhận được response thành công")
 
                     # Ẩn label "Trang để in" trước khi trích xuất HTML
                     driver.execute_script("""
@@ -307,18 +325,6 @@ def main():
                     output_filename = f"{customs_item['tax_code']}-{customs_item['custom_no']}.pdf"
                     output_path = os.path.join(downloads_dir, output_filename)
 
-                    # Cấu hình PDF options cho pdfkit
-                    options = {
-                        'page-size': 'A4',
-                        'margin-top': '1cm',
-                        'margin-right': '1cm',
-                        'margin-bottom': '1cm',
-                        'margin-left': '1cm',
-                        'encoding': 'UTF-8',
-                        'no-outline': None,
-                        'quiet': ''
-                    }
-
                     # Thêm CSS styles trực tiếp vào HTML
                     css = '''
                         <style>
@@ -333,34 +339,35 @@ def main():
                     '''
                     html_with_css = css + html_content
 
-                    # Chuyển HTML thành PDF sử dụng pdfkit
-                    try:
-                        pdf = pdfkit.from_string(html_with_css, False, options=options)
+                    # Tạo PDF từ HTML content
+                    success, result = pdf_generator.html_to_pdf( html_with_css, output_path)
 
-                        # Kiểm tra kích thước PDF
-                        if len(pdf) < 1000:  # Nhỏ hơn 1KB
-                            if attempt < max_attempts - 1:
-                                print(f"PDF size quá nhỏ ({len(pdf)} bytes), thử lại lần {attempt + 2}...")
-                                time.sleep(2)
-                                continue
-                            else:
-                                raise Exception(f"PDF size quá nhỏ ({len(pdf)} bytes) sau {max_attempts} lần thử")
-
-                        # Nếu PDF hợp lệ, lưu file vào thư mục downloads
-                        with open(output_path, 'wb') as f:
-                            f.write(pdf)
-                        print(f"✓ Đã tạo file PDF: {output_path}")
-                        break  # Thoát khỏi vòng lặp nếu thành công
-
-                    except Exception as pdf_error:
-                        print(f"Lỗi khi tạo PDF: {str(pdf_error)}")
+                    if not success:
                         if attempt < max_attempts - 1:
+                            print(f"Lỗi khi tạo PDF: {result}, thử lại lần {attempt + 2}...")
+                            time.sleep(2)
                             continue
-                        raise
+                        else:
+                            raise Exception(f"Không thể tạo PDF sau {max_attempts} lần thử: {result}")
+
+                    # Kiểm tra kích thước file PDF
+                    pdf_size = os.path.getsize(output_path)
+                    if pdf_size < 1000:  # Nhỏ hơn 1KB
+                        if attempt < max_attempts - 1:
+                            print(f"PDF size quá nhỏ ({pdf_size} bytes), thử lại lần {attempt + 2}...")
+                            os.remove(output_path)  # Xóa file PDF không hợp lệ
+                            time.sleep(2)
+                            continue
+                        else:
+                            raise Exception(f"PDF size quá nhỏ ({pdf_size} bytes) sau {max_attempts} lần thử")
+
+                    print(f"✓ Đã tạo file PDF: {output_path}")
+                    break  # Thoát khỏi vòng lặp nếu thành công
 
                 except Exception as e:
+                    print(f"Lần {attempt + 1}: Chi tiết lỗi - {str(e)}")
                     if attempt < max_attempts - 1:
-                        print(f"Lỗi trong lần thử {attempt + 1}: {str(e)}, đang thử lại...")
+                        print(f"Đang thử lại sau 2 giây...")
                         time.sleep(2)
                     else:
                         raise Exception(f"Lỗi sau {max_attempts} lần thử: {str(e)}")
@@ -386,7 +393,6 @@ def main():
                 break
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nĐã nhận tín hiệu thoát chương trình")
         if driver:
             driver.quit()
 

@@ -142,7 +142,7 @@ import sys
 def get_wkhtmltopdf_path():
     """Get the appropriate wkhtmltopdf path based on the platform"""
     if sys.platform == 'win32':
-        return 'C:\\\\Program Files\\\\wkhtmltopdf\\\\bin\\\\wkhtmltopdf.exe'
+        return os.path.join('C:', 'Program Files (x86)', 'wkhtmltopdf', 'bin', 'wkhtmltopdf.exe')
     elif sys.platform == 'darwin':
         return '/usr/local/bin/wkhtmltopdf'
     else:
@@ -181,14 +181,13 @@ def build_application():
         # Create spec file
         create_spec_file()
 
-        # Build using PyInstaller with additional options
+        # Build using PyInstaller with minimal options
         print("\nBuilding application...")
         subprocess.run([
             'pyinstaller',
             'customs_fetcher.spec',
             '--clean',
-            '--noconfirm',  # Add this to avoid confirmation prompts
-            '--log-level=DEBUG'  # Add this for more detailed logging
+            '--noconfirm'
         ], check=True)
 
         # Post-build cleanup and verification
@@ -222,3 +221,6 @@ if __name__ == "__main__":
     print(f"Building for: {platform.system()} ({sys.platform})")
     success = build_application()
     sys.exit(0 if success else 1)
+
+
+

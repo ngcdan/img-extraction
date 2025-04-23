@@ -5,7 +5,7 @@ import sys
 def get_wkhtmltopdf_path():
     """Get the appropriate wkhtmltopdf path based on the platform"""
     if sys.platform == 'win32':
-        return os.path.join('C:', 'Program Files (x86)', 'wkhtmltopdf', 'bin', 'wkhtmltopdf.exe')
+        return os.path.join('C:\\', 'Program Files (x86)', 'wkhtmltopdf', 'bin', 'wkhtmltopdf.exe')
     elif sys.platform == 'darwin':
         return '/usr/local/bin/wkhtmltopdf'
     else:

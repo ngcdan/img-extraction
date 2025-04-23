@@ -57,21 +57,13 @@ class ChromeManager:
         Returns:
             WebDriver instance hoặc None nếu không thể khởi tạo
         """
-        # Lấy thông tin đăng nhập trước để tránh đọc file nhiều lần
-        login_credentials = ChromeManager._get_login_credentials() if auto_login else None
-
         for attempt in range(max_retries):
             try:
                 # Thiết lập options tối thiểu cho Chrome để mở nhanh nhất
                 chrome_options = webdriver.ChromeOptions()
 
                 # Thêm chế độ ẩn danh
-                chrome_options.add_argument('--incognito')
-
-                # Thêm các options để ngăn redirect và tracking
-                chrome_options.add_argument('--disable-web-security')
-                chrome_options.add_argument('--disable-session-cookies')
-                chrome_options.add_argument('--disable-client-side-phishing-detection')
+                # chrome_options.add_argument('--incognito')
 
                 # Thêm experimental options
                 prefs = {
@@ -190,135 +182,6 @@ class ChromeManager:
             return False
 
     @staticmethod
-    def fill_login_info(driver: webdriver.Chrome, username: str, password: str, max_wait_time: int = 240) -> bool:
-        """Điền thông tin đăng nhập và đợi user login thành công"""
-        wait = WebDriverWait(driver, 10)
-        start_time = time.time()
-        # last_captcha = {'text': None, 'image': None}  # Comment lại biến lưu captcha
-
-        def is_login_successful() -> bool:
-            """Kiểm tra đăng nhập thành công"""
-            return (driver.current_url == ChromeManager.HOME_URL or
-                    (driver.current_url != ChromeManager.LOGIN_URL and "dang-nhap" not in driver.current_url))
-
-        def needs_refill() -> bool:
-            """Kiểm tra xem có cần điền lại thông tin không"""
-            try:
-                username_input = driver.find_element(By.ID, "form-username")
-                return not username_input.get_attribute('value')
-            except:
-                return False
-
-        def fill_form() -> bool:
-            """Điền thông tin form"""
-            try:
-                username_input = wait.until(EC.presence_of_element_located((By.ID, "form-username")))
-                username_input.clear()
-                username_input.send_keys(username)
-
-                password_input = wait.until(EC.presence_of_element_located((By.ID, "form-password")))
-                password_input.clear()
-                password_input.send_keys(password)
-
-                return True
-            except Exception as e:
-                print(f"Lỗi khi điền form: {str(e)}")
-                return False
-
-        # Comment lại toàn bộ phần script theo dõi captcha
-        js_script = """
-        window.captchaValue = '';
-        window.lastSubmittedCaptcha = '';
-        window.getCaptchaValue = function() {
-            return window.captchaValue;
-        };
-
-        const captchaInput = document.getElementById('CaptchaInputText');
-        if (captchaInput) {
-            captchaInput.addEventListener('input', function() {
-                window.captchaValue = this.value;
-                if (this.value.length >= 5 && this.value !== window.lastSubmittedCaptcha) {
-                    window.lastSubmittedCaptcha = this.value;
-                    const submitBtn = document.querySelector('button[type="submit"]');
-                    if (submitBtn) {
-                        console.log('Auto submitting with captcha:', this.value);
-                        submitBtn.click();
-                    }
-                }
-            });
-
-            captchaInput.addEventListener('blur', function() {
-                window.captchaValue = this.value;
-            });
-        }
-        """
-        try:
-            driver.execute_script(js_script)
-        except:
-            print("Không thể thêm script theo dõi captcha")
-
-        # Đảm bảo đang ở trang đăng nhập
-        if driver.current_url != ChromeManager.LOGIN_URL:
-            driver.get(ChromeManager.LOGIN_URL)
-            time.sleep(1)
-
-        # Điền thông tin lần đầu
-        if not fill_form():
-            raise Exception("Không thể điền thông tin đăng nhập lần đầu")
-
-        # Loop kiểm tra liên tục
-        while time.time() - start_time < max_wait_time:
-            try:
-                # Comment lại phần xử lý captcha
-                # current_captcha = get_current_captcha()
-                # if (current_captcha and
-                #     len(current_captcha) >= 5 and
-                #     current_captcha != last_captcha.get('text')):
-                #     try:
-                #         captcha_element = driver.find_element(By.ID, "CaptchaImage")
-                #         last_captcha = {
-                #             'text': current_captcha,
-                #             'image': captcha_element.screenshot_as_png
-                #         }
-                #         try:
-                #             submit_btn = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-                #             if submit_btn and submit_btn.is_enabled():
-                #                 driver.execute_script("arguments[0].click();", submit_btn)
-                #         except:
-                #             pass
-
-                #     except:
-                #         pass
-
-                if is_login_successful():
-                    # Comment lại phần lưu captcha
-                    # if last_captcha['text'] and last_captcha['image']:
-                    #     ChromeManager.save_captcha_and_label(last_captcha['image'], last_captcha['text'])
-                    # CookieManager.save_cookies(driver, username)
-                    return True
-
-                if "dang-nhap" in driver.current_url:
-                    error_messages = driver.find_elements(By.CLASS_NAME, "validation-summary-errors")
-                    if error_messages and any(msg.is_displayed() for msg in error_messages):
-                        if needs_refill():
-                            fill_form()
-                    elif needs_refill():
-                        fill_form()
-
-                time.sleep(0.5)
-
-            except Exception as e:
-                print(f"Lỗi khi kiểm tra trạng thái: {str(e)}")
-                try:
-                    driver.get(ChromeManager.LOGIN_URL)
-                    time.sleep(1)
-                    fill_form()
-                except:
-                    pass
-
-        raise Exception(f"Hết thời gian chờ ({max_wait_time}s) - Người dùng chưa đăng nhập thành công")
-
-    @staticmethod
     def wait_for_search_complete(driver: webdriver.Chrome, timeout: int = 30) -> bool:
         """Chờ cho kết quả tìm kiếm hoàn tất và bảng dữ liệu được load
 
@@ -363,39 +226,3 @@ class ChromeManager:
         except TimeoutException:
             return False
 
-    @staticmethod
-    def _get_login_credentials() -> Dict[str, str]:
-        """
-        Lấy thông tin đăng nhập từ file accounts.json
-
-        Returns:
-            Dict[str, str]: Thông tin đăng nhập gồm username và password
-        """
-        # Giá trị mặc định nếu không tìm thấy file
-        default_credentials = {
-            "username": "0303482440",
-            "password": "@Mst0303482440"
-        }
-
-        try:
-            # Thử load file accounts.json
-            accounts_path = 'accounts.json'
-            if not os.path.exists(accounts_path):
-                # Trong production, sử dụng đường dẫn tương đối
-                accounts_path = get_resource_path(accounts_path)
-
-            if os.path.exists(accounts_path):
-                # Đọc file và lấy tài khoản ngẫu nhiên
-                with open(accounts_path, 'r') as f:
-                    accounts = json.load(f)
-
-                if accounts and len(accounts) > 0:
-                    account = random.choice(accounts)
-                    return account
-                else:
-                    print("File accounts.json không có dữ liệu")
-            else:
-                print(f"Không tìm thấy file accounts tại {accounts_path}")
-        except Exception as e:
-            print(f"Lỗi khi đọc file accounts: {str(e)}")
-        return default_credentials

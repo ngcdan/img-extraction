@@ -2,188 +2,195 @@ import sys
 import subprocess
 import os
 from pathlib import Path
-import argparse
 import shutil
-import tempfile
-from PIL import Image
+import platform
 
-def convert_to_ico(jpg_path, ico_path):
-    """Convert JPG to ICO format"""
+def check_macos_dependencies():
+    """Check and install macOS dependencies using Homebrew"""
     try:
-        img = Image.open(jpg_path)
-        # Resize to standard icon sizes
-        icon_sizes = [(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)]
-        img.save(ico_path, format='ICO', sizes=icon_sizes)
-        return True
-    except Exception as e:
-        print(f"Error converting to ICO: {e}")
-        return False
+        subprocess.run(['brew', '--version'], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Installing Homebrew...")
+        subprocess.run(['/bin/bash', '-c', "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"])
 
-def convert_to_icns(jpg_path, icns_path):
-    """Convert JPG to ICNS format for macOS"""
+    # Install wkhtmltopdf for PDF generation
     try:
-        img = Image.open(jpg_path)
-        # Resize to 1024x1024 (standard size for macOS icons)
-        img = img.resize((1024,1024))
-        img.save(icns_path, format='ICNS')
-        return True
-    except Exception as e:
-        print(f"Error converting to ICNS: {e}")
-        return False
-
-def prepare_icon():
-    """Prepare icon files from avatar.jpg"""
-    avatar_path = 'avatar.jpg'
-    if not os.path.exists(avatar_path):
-        print("Warning: avatar.jpg not found")
-        return None
-
-    # Create static directory if it doesn't exist
-    static_dir = Path('static')
-    static_dir.mkdir(exist_ok=True)
-
-    icon_path = None
-    if sys.platform == 'win32':
-        icon_path = static_dir / 'icon.ico'
-        if convert_to_ico(avatar_path, icon_path):
-            print(f"Created icon at: {icon_path}")
-    else:  # macOS
-        icon_path = static_dir / 'icon.icns'
-        if convert_to_icns(avatar_path, icon_path):
-            print(f"Created icon at: {icon_path}")
-
-    return icon_path
+        subprocess.run(['wkhtmltopdf', '--version'], check=True, capture_output=True)
+        print("✓ wkhtmltopdf is installed")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Installing wkhtmltopdf...")
+        subprocess.run(['brew', 'install', 'wkhtmltopdf'], check=True)
 
 def install_requirements():
-    """Install required packages"""
+    """Install Python dependencies"""
+    print("Installing Python requirements...")
+    subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'])
     subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
 
-def prepare_sensitive_files():
-    """
-    Chuẩn bị các file nhạy cảm bằng cách copy và đổi tên
-    để ẩn mục đích sử dụng
-    """
-    sensitive_files = {
-        'driver-service-account.json': 'data1.bin',
-        'driver-service-account.json': 'data2.bin',
-        'accounts.json': 'accounts.json',
+def prepare_project_files():
+    """Prepare necessary project files"""
+    # Create required directories
+    directories = ['downloads', 'static']
+    for dir_name in directories:
+        os.makedirs(dir_name, exist_ok=True)
+        print(f"✓ Created directory: {dir_name}")
+
+    # Copy required files
+    files_to_copy = {
+        'data_template.xlsx': 'data_template.xlsx',
         '.env': '.env'
-        # Thêm các file nhạy cảm khác vào đây
     }
 
-    copied_files = []
-
-    # Tạo thư mục build nếu chưa tồn tại
-    build_dir = Path('build/sensitive')
-    build_dir.mkdir(parents=True, exist_ok=True)
-
-    for src, dest in sensitive_files.items():
+    for src, dest in files_to_copy.items():
         if os.path.exists(src):
-            # Copy vào thư mục build với tên mới
-            dest_path = build_dir / dest
-            shutil.copy2(src, dest_path)
-            # Thêm vào danh sách files để bundle
-            copied_files.append((str(dest_path), '.'))
-            print(f"Processed sensitive file: {src} -> {dest}")
+            shutil.copy2(src, f'build/{dest}')
+            print(f"✓ Copied {src} to build/")
         else:
-            print(f"Warning: Sensitive file not found: {src}")
+            print(f"Warning: {src} not found")
 
-    return copied_files
+def create_spec_file():
+    """Create custom spec file for PyInstaller"""
+    spec_content = '''
+# -*- mode: python ; coding: utf-8 -*-
 
-def build_application(show_console=True):
-    """Build the application for current platform"""
-    # Define main file and data files
-    main_file = 'pdf_processor.py'
+block_cipher = None
 
-    # Prepare icon
-    icon_path = prepare_icon()
-
-    # Process sensitive files
-    sensitive_data_files = prepare_sensitive_files()  # Removed temp_dir parameter
-
-    # Collect all required data files
-    data_files = []
-
-    # Add required directories if they exist
-    required_dirs = [
-        ('templates', 'templates'),
+a = Analysis(
+    ['fetch_co.py'],
+    pathex=[],
+    binaries=[],
+    datas=[
+        ('data_template.xlsx', '.'),
+        ('.env', '.'),
+        ('downloads', 'downloads'),
         ('static', 'static')
-    ]
+    ],
+    hiddenimports=[
+        'pdfkit',
+        'PIL',
+        'selenium',
+        'pandas',
+        'openpyxl',
+        'tenacity',
+        'cffi'
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=['hook-runtime.py'],  # Add runtime hook here
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False
+)
 
-    for src, dest in required_dirs:
-        if os.path.exists(src) and os.path.isdir(src):
-            data_files.append((src, dest))
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-    # Add .env if exists
-    if os.path.exists('.env'):
-        data_files.append(('.env', '.'))
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='customs_fetcher',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,
+    disable_windowed_traceback=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+)
+'''
+    with open('customs_fetcher.spec', 'w') as f:
+        f.write(spec_content)
+    print("✓ Created PyInstaller spec file")
 
-    # Add sensitive files
-    data_files.extend(sensitive_data_files)
+def create_runtime_hook():
+    """Create a runtime hook for PyInstaller"""
+    hook_content = '''
+import os
+import sys
 
-    # Basic PyInstaller options
-    options = [
-        '--onefile',              # Create a single executable
-        '--clean',                # Clean PyInstaller cache
-        '--noconfirm',           # Replace output directory without asking
-        '--name', 'pdf_processor' # Output name
-    ]
-
-    # Platform specific options
+def get_wkhtmltopdf_path():
+    """Get the appropriate wkhtmltopdf path based on the platform"""
     if sys.platform == 'win32':
-        options.extend([
-            '--uac-admin',        # Request admin privileges
-            f'--icon={icon_path}' if icon_path else None
-        ])
+        return 'C:\\\\Program Files\\\\wkhtmltopdf\\\\bin\\\\wkhtmltopdf.exe'
+    elif sys.platform == 'darwin':
+        return '/usr/local/bin/wkhtmltopdf'
+    else:
+        return '/usr/bin/wkhtmltopdf'
 
-        # Add --noconsole only if show_console is False
-        if not show_console:
-            options.append('--noconsole')
+# Configure pdfkit to use the correct wkhtmltopdf path
+import pdfkit
+config = pdfkit.configuration(wkhtmltopdf=get_wkhtmltopdf_path())
+'''
+    with open('hook-runtime.py', 'w') as f:
+        f.write(hook_content)
+    print("✓ Created PyInstaller runtime hook")
 
-    else:  # macOS
-        options.extend([
-            f'--icon={icon_path}' if icon_path else None
-        ])
-
-    # Add data files
-    for src, dest in data_files:
-        separator = ';' if sys.platform == 'win32' else ':'
-        options.append(f'--add-data={src}{separator}{dest}')
-
-    # Remove None values
-    options = [opt for opt in options if opt is not None]
-
-    # Build command
-    command = ['pyinstaller'] + options + [main_file]
-
-    # Print command for debugging
-    print("\nBuilding with command:", ' '.join(command))
-
-    # Create dist directory if it doesn't exist
-    dist_dir = Path('dist')
-    dist_dir.mkdir(exist_ok=True)
-
-    # Run PyInstaller
+def build_application():
+    """Build the application"""
     try:
-        subprocess.run(command, check=True)
-        output_file = 'pdf_processor.exe' if sys.platform == 'win32' else 'pdf_processor'
-        console_status = "với console" if show_console else "không có console"
-        print(f"\nBuild successful! Output file: dist/{output_file} ({console_status})")
-    except subprocess.CalledProcessError as e:
-        print(f"\nBuild failed with error: {e}")
-        sys.exit(1)
+        # Create build directory
+        os.makedirs('build', exist_ok=True)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Build PDF Processor application')
-    parser.add_argument('--no-console', action='store_true',
-                      help='Hide console window in Windows build')
-    args = parser.parse_args()
+        # Platform-specific preparations
+        if sys.platform == 'darwin':  # macOS
+            check_macos_dependencies()
+        elif sys.platform == 'win32':  # Windows
+            print("Please ensure wkhtmltopdf is installed from: https://wkhtmltopdf.org/downloads.html")
+            input("Press Enter to continue after installing wkhtmltopdf...")
 
-    # Install Pillow if not already installed
-    # subprocess.run([sys.executable, '-m', 'pip', 'install', 'Pillow'])
+        # Install Python requirements
+        install_requirements()
 
-    print("Installing requirements...")
-    install_requirements()
+        # Prepare project files
+        prepare_project_files()
 
-    print("\nBuilding application...")
-    build_application(show_console=not args.no_console)
+        # Create runtime hook
+        create_runtime_hook()
+
+        # Create spec file
+        create_spec_file()
+
+        # Build using PyInstaller
+        print("\nBuilding application...")
+        subprocess.run(['pyinstaller', 'customs_fetcher.spec', '--clean'], check=True)  # Removed --runtime-hook
+
+        # Post-build cleanup and verification
+        dist_dir = Path('dist')
+        output_file = 'customs_fetcher.exe' if sys.platform == 'win32' else 'customs_fetcher'
+        output_path = dist_dir / output_file
+
+        if output_path.exists():
+            print(f"\n✓ Build successful! Output file: {output_path}")
+
+            # Copy necessary files to dist directory
+            for file in ['data_template.xlsx', '.env']:
+                if os.path.exists(file):
+                    shutil.copy2(file, dist_dir / file)
+                    print(f"✓ Copied {file} to dist/")
+
+            # Create downloads directory in dist
+            os.makedirs(dist_dir / 'downloads', exist_ok=True)
+            print("✓ Created downloads directory in dist/")
+        else:
+            print("\n❌ Build failed: Output file not found")
+            return False
+
+        return True
+
+    except Exception as e:
+        print(f"\n❌ Build failed with error: {e}")
+        return False
+
+if __name__ == "__main__":
+    print(f"Building for: {platform.system()} ({sys.platform})")
+    success = build_application()
+    sys.exit(0 if success else 1)

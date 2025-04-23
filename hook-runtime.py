@@ -1,16 +1,18 @@
 
+# Runtime hook for PyInstaller
 import os
 import sys
+import importlib.util
 
-def get_wkhtmltopdf_path():
-    """Get the appropriate wkhtmltopdf path based on the platform"""
-    if sys.platform == 'win32':
-        return os.path.join('C:\\', 'Program Files (x86)', 'wkhtmltopdf', 'bin', 'wkhtmltopdf.exe')
-    elif sys.platform == 'darwin':
-        return '/usr/local/bin/wkhtmltopdf'
-    else:
-        return '/usr/bin/wkhtmltopdf'
+# Add missing modules to sys.modules
+missing_modules = [
+    'win32api', 'win32con', 'win32gui', 'ctypes.wintypes'
+]
 
-# Configure pdfkit to use the correct wkhtmltopdf path
-import pdfkit
-config = pdfkit.configuration(wkhtmltopdf=get_wkhtmltopdf_path())
+for module in missing_modules:
+    try:
+        if importlib.util.find_spec(module) and module not in sys.modules:
+            __import__(module)
+            print(f"Runtime hook: Successfully imported {module}")
+    except (ImportError, ModuleNotFoundError):
+        print(f"Runtime hook: Module {module} not available")

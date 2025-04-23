@@ -35,6 +35,9 @@ def prepare_project_files():
         os.makedirs(dir_name, exist_ok=True)
         print(f"✓ Created directory: {dir_name}")
 
+    # Create build directory if it doesn't exist
+    os.makedirs('build', exist_ok=True)
+
     # Copy required files
     files_to_copy = {
         'data_template.xlsx': 'data_template.xlsx',
@@ -48,10 +51,34 @@ def prepare_project_files():
         else:
             print(f"Warning: {src} not found")
 
+def create_runtime_hook():
+    """Create runtime hook for PyInstaller"""
+    hook_content = '''
+# Runtime hook for PyInstaller
+import os
+import sys
+import importlib.util
+
+# Add missing modules to sys.modules
+missing_modules = [
+    'win32api', 'win32con', 'win32gui', 'ctypes.wintypes'
+]
+
+for module in missing_modules:
+    try:
+        if importlib.util.find_spec(module) and module not in sys.modules:
+            __import__(module)
+            print(f"Runtime hook: Successfully imported {module}")
+    except (ImportError, ModuleNotFoundError):
+        print(f"Runtime hook: Module {module} not available")
+'''
+    with open('hook-runtime.py', 'w') as f:
+        f.write(hook_content)
+    print("✓ Created PyInstaller runtime hook")
+
 def create_spec_file():
     """Create custom spec file for PyInstaller"""
-    spec_content = '''
-# -*- mode: python ; coding: utf-8 -*-
+    spec_content = '''# -*- mode: python ; coding: utf-8 -*-
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -85,6 +112,15 @@ hiddenimports = [
     'packaging.specifiers',
     'packaging.requirements'
 ]
+
+if sys.platform == 'win32':
+    hiddenimports.extend([
+        'win32api',
+        'win32con',
+        'win32gui',
+        'ctypes.wintypes',
+        'win32com.client'
+    ])
 
 # Collect additional dependencies
 tmp_ret = collect_all('pandas')
@@ -127,8 +163,11 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-)
-'''
+)'''
+
+    # Add sys import to the beginning of the spec file
+    spec_content = "import sys\n" + spec_content
+
     with open('customs_fetcher.spec', 'w') as f:
         f.write(spec_content)
     print("✓ Created PyInstaller spec file")
@@ -136,15 +175,22 @@ exe = EXE(
 def build_application():
     """Build the application"""
     try:
-        # Create build directory
-        os.makedirs('build', exist_ok=True)
-
         # Platform-specific preparations
         if sys.platform == 'darwin':  # macOS
             check_macos_dependencies()
         elif sys.platform == 'win32':  # Windows
-            print("Please ensure wkhtmltopdf is installed from: https://wkhtmltopdf.org/downloads.html")
-            input("Press Enter to continue after installing wkhtmltopdf...")
+            print("Checking if wkhtmltopdf is installed...")
+            try:
+                # Try to run wkhtmltopdf to check if it's installed
+                subprocess.run(['wkhtmltopdf', '--version'],
+                             check=True,
+                             stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+                print("✓ wkhtmltopdf is installed")
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("wkhtmltopdf is not installed. Please install from: https://wkhtmltopdf.org/downloads.html")
+                print("After installation, add it to your PATH or specify its location in pdf_generator.py")
+                input("Press Enter to continue after installing wkhtmltopdf...")
 
         # Install Python requirements
         install_requirements()
@@ -152,17 +198,48 @@ def build_application():
         # Prepare project files
         prepare_project_files()
 
+        # Create runtime hook
+        create_runtime_hook()
+
         # Create spec file
         create_spec_file()
 
         # Build using PyInstaller with minimal options
         print("\nBuilding application...")
-        subprocess.run([
-            'pyinstaller',
+
+        # Use a more verbose command for better debugging
+        pyinstaller_cmd = [
+            sys.executable,
+            '-m',
+            'PyInstaller',
             'customs_fetcher.spec',
             '--clean',
-            '--noconfirm'
-        ], check=True)
+            '--noconfirm',
+            '--log-level=DEBUG'
+        ]
+
+        # Print command for debugging
+        print(f"Running command: {' '.join(pyinstaller_cmd)}")
+
+        # Run PyInstaller with subprocess to capture all output
+        process = subprocess.run(
+            pyinstaller_cmd,
+            check=False,  # Don't raise exception on non-zero return code
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        # Print output for debugging
+        print("STDOUT:")
+        print(process.stdout)
+
+        print("STDERR:")
+        print(process.stderr)
+
+        if process.returncode != 0:
+            print(f"PyInstaller returned with error code: {process.returncode}")
+            return False
 
         # Post-build cleanup and verification
         dist_dir = Path('dist')
@@ -189,12 +266,11 @@ def build_application():
 
     except Exception as e:
         print(f"\n❌ Build failed with error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 if __name__ == "__main__":
     print(f"Building for: {platform.system()} ({sys.platform})")
     success = build_application()
     sys.exit(0 if success else 1)
-
-
-

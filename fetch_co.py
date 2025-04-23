@@ -372,14 +372,6 @@ def main():
                     else:
                         raise Exception(f"Lỗi sau {max_attempts} lần thử: {str(e)}")
 
-            # Set lại style display:none sau khi download xong
-            driver.execute_script("""
-                var span = document.getElementById('pt1:png1');
-                if (span) {
-                    span.style.display = 'none';
-                }
-            """)
-
     except Exception as e:
         print(f"Lỗi khi xử lý: {str(e)}")
 

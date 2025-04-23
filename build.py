@@ -107,7 +107,6 @@ hiddenimports = [
     'selenium.webdriver.support.expected_conditions',
     'selenium.common.exceptions',
     'selenium.webdriver.common.action_chains',
-    'pkg_resources.py2_warn',
     'packaging.version',
     'packaging.specifiers',
     'packaging.requirements'
@@ -135,7 +134,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['hook-runtime.py'],
-    excludes=[],
+    excludes=['pkg_resources.py2_warn', 'pkg_resources._vendor.packaging'],  # Thêm vào đây
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -155,7 +154,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,  # Tắt UPX để tránh một số vấn đề
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
@@ -215,6 +214,7 @@ def build_application():
             'customs_fetcher.spec',
             '--clean',
             '--noconfirm',
+            '--noupx',  # Thêm cờ này
             '--log-level=DEBUG'
         ]
 

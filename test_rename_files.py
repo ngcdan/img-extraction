@@ -18,7 +18,7 @@ def rename_files_in_folder():
         # Tìm folder 09042025
         query = [
             f"'{root_id}' in parents",
-            "name = '10042025'",
+            "name = '20042025'",
             "mimeType = 'application/vnd.google-apps.folder'",
             "trashed = false"
         ]
@@ -31,7 +31,7 @@ def rename_files_in_folder():
 
         folders = results.get('files', [])
         if not folders:
-            raise Exception("Không tìm thấy thư mục 10042025")
+            raise Exception("Không tìm thấy thư mục 20042025")
 
         target_folder_id = folders[0]['id']
 

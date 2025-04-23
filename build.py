@@ -53,36 +53,52 @@ def create_spec_file():
     spec_content = '''
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_all
+
 block_cipher = None
+
+# Collect all necessary data
+datas = [
+    ('data_template.xlsx', '.'),
+    ('.env', '.'),
+    ('downloads', 'downloads'),
+    ('static', 'static')
+]
+
+binaries = []
+hiddenimports = [
+    'pdfkit',
+    'PIL',
+    'selenium',
+    'pandas',
+    'openpyxl',
+    'tenacity',
+    'cffi',
+    'selenium.webdriver',
+    'selenium.webdriver.common.by',
+    'selenium.webdriver.support.ui',
+    'selenium.webdriver.support.expected_conditions',
+    'selenium.common.exceptions',
+    'selenium.webdriver.common.action_chains',
+    'pkg_resources.py2_warn',
+    'packaging.version',
+    'packaging.specifiers',
+    'packaging.requirements'
+]
+
+# Collect additional dependencies
+tmp_ret = collect_all('pandas')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 a = Analysis(
     ['fetch_co.py'],
     pathex=[],
-    binaries=[],
-    datas=[
-        ('data_template.xlsx', '.'),
-        ('.env', '.'),
-        ('downloads', 'downloads'),
-        ('static', 'static')
-    ],
-   hiddenimports=[
-       'pdfkit',
-       'PIL',
-       'selenium',
-       'pandas',
-       'openpyxl',
-       'tenacity',
-       'cffi',
-       'selenium.webdriver',
-       'selenium.webdriver.common.by',
-       'selenium.webdriver.support.ui',
-       'selenium.webdriver.support.expected_conditions',
-       'selenium.common.exceptions',
-       'selenium.webdriver.common.action_chains'
-   ],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=['hook-runtime.py'],  # Add runtime hook here
+    runtime_hooks=['hook-runtime.py'],
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -165,9 +181,15 @@ def build_application():
         # Create spec file
         create_spec_file()
 
-        # Build using PyInstaller
+        # Build using PyInstaller with additional options
         print("\nBuilding application...")
-        subprocess.run(['pyinstaller', 'customs_fetcher.spec', '--clean'], check=True)  # Removed --runtime-hook
+        subprocess.run([
+            'pyinstaller',
+            'customs_fetcher.spec',
+            '--clean',
+            '--noconfirm',  # Add this to avoid confirmation prompts
+            '--log-level=DEBUG'  # Add this for more detailed logging
+        ], check=True)
 
         # Post-build cleanup and verification
         dist_dir = Path('dist')

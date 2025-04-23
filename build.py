@@ -133,29 +133,6 @@ exe = EXE(
         f.write(spec_content)
     print("✓ Created PyInstaller spec file")
 
-def create_runtime_hook():
-    """Create a runtime hook for PyInstaller"""
-    hook_content = '''
-import os
-import sys
-
-def get_wkhtmltopdf_path():
-    """Get the appropriate wkhtmltopdf path based on the platform"""
-    if sys.platform == 'win32':
-        return os.path.join('C:\\', 'Program Files (x86)', 'wkhtmltopdf', 'bin', 'wkhtmltopdf.exe')
-    elif sys.platform == 'darwin':
-        return '/usr/local/bin/wkhtmltopdf'
-    else:
-        return '/usr/bin/wkhtmltopdf'
-
-# Configure pdfkit to use the correct wkhtmltopdf path
-import pdfkit
-config = pdfkit.configuration(wkhtmltopdf=get_wkhtmltopdf_path())
-'''
-    with open('hook-runtime.py', 'w') as f:
-        f.write(hook_content)
-    print("✓ Created PyInstaller runtime hook")
-
 def build_application():
     """Build the application"""
     try:
@@ -174,9 +151,6 @@ def build_application():
 
         # Prepare project files
         prepare_project_files()
-
-        # Create runtime hook
-        create_runtime_hook()
 
         # Create spec file
         create_spec_file()

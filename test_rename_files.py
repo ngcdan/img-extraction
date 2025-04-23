@@ -18,7 +18,7 @@ def rename_files_in_folder():
         # Tìm folder 09042025
         query = [
             f"'{root_id}' in parents",
-            "name = '20042025'",
+            "name = '17042025'",
             "mimeType = 'application/vnd.google-apps.folder'",
             "trashed = false"
         ]

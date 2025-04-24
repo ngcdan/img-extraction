@@ -1,0 +1,40 @@
+# Sử dụng Windows Server Core làm base image
+FROM mcr.microsoft.com/windows/servercore:ltsc2019
+
+# Thiết lập shell cho Windows
+SHELL ["powershell", "-Command", "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue';"]
+
+# Cài đặt Chocolatey
+RUN Set-ExecutionPolicy Bypass -Scope Process -Force; \
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; \
+    iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+# Cài đặt Python và wkhtmltopdf using Chocolatey
+RUN choco install -y python --version=3.10.10 && \
+    choco install -y wkhtmltopdf
+
+# Thiết lập PATH cho Python
+RUN $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine")
+
+# Tạo và thiết lập thư mục làm việc
+WORKDIR /app
+
+# Copy requirements.txt trước để tận dụng cache
+COPY requirements.txt .
+
+# Cài đặt dependencies
+RUN python -m pip install --upgrade pip && \
+    pip install -r requirements.txt
+
+# Copy toàn bộ source code
+COPY . .
+
+# Build ứng dụng thành file exe
+RUN python build.py
+
+# Tạo thư mục output để chứa file exe và các file cần thiết
+RUN New-Item -ItemType Directory -Force -Path C:/output
+RUN Copy-Item "dist/*" -Destination "C:/output" -Recurse
+
+# Thiết lập volume để lấy file exe ra
+VOLUME C:/output

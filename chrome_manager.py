@@ -75,6 +75,8 @@ class ChromeManager:
                 }
                 chrome_options.add_experimental_option("prefs", prefs)
 
+                # chrome_options.add_argument('--headless')  # Chạy Chrome trong chế độ headless
+
                 # Tắt các log và warning
                 chrome_options.add_argument('--log-level=3')  # Chỉ hiển thị lỗi nghiêm trọng
                 chrome_options.add_argument('--silent')  # Chế độ im lặng

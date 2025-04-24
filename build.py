@@ -4,273 +4,211 @@ import os
 from pathlib import Path
 import shutil
 import platform
+import logging
+import time
+from typing import List, Tuple
 
-def check_macos_dependencies():
-    """Check and install macOS dependencies using Homebrew"""
-    try:
-        subprocess.run(['brew', '--version'], check=True, capture_output=True)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Installing Homebrew...")
-        subprocess.run(['/bin/bash', '-c', "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"])
-
-    # Install wkhtmltopdf for PDF generation
-    try:
-        subprocess.run(['wkhtmltopdf', '--version'], check=True, capture_output=True)
-        print("✓ wkhtmltopdf is installed")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        print("Installing wkhtmltopdf...")
-        subprocess.run(['brew', 'install', 'wkhtmltopdf'], check=True)
-
-def install_requirements():
-    """Install Python dependencies"""
-    print("Installing Python requirements...")
-    subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'])
-    subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
-
-def prepare_project_files():
-    """Prepare necessary project files"""
-    # Create required directories
-    directories = ['downloads', 'static']
-    for dir_name in directories:
-        os.makedirs(dir_name, exist_ok=True)
-        print(f"✓ Created directory: {dir_name}")
-
-    # Create build directory if it doesn't exist
-    os.makedirs('build', exist_ok=True)
-
-    # Copy required files
-    files_to_copy = {
-        'data_template.xlsx': 'data_template.xlsx',
-        '.env': '.env'
-    }
-
-    for src, dest in files_to_copy.items():
-        if os.path.exists(src):
-            shutil.copy2(src, f'build/{dest}')
-            print(f"✓ Copied {src} to build/")
-        else:
-            print(f"Warning: {src} not found")
-
-def create_runtime_hook():
-    """Create runtime hook for PyInstaller"""
-    hook_content = '''
-# Runtime hook for PyInstaller
-import os
-import sys
-import importlib.util
-
-# Add missing modules to sys.modules
-missing_modules = [
-    'win32api', 'win32con', 'win32gui', 'ctypes.wintypes'
-]
-
-for module in missing_modules:
-    try:
-        if importlib.util.find_spec(module) and module not in sys.modules:
-            __import__(module)
-            print(f"Runtime hook: Successfully imported {module}")
-    except (ImportError, ModuleNotFoundError):
-        print(f"Runtime hook: Module {module} not available")
-'''
-    with open('hook-runtime.py', 'w') as f:
-        f.write(hook_content)
-    print("✓ Created PyInstaller runtime hook")
-
-def create_spec_file():
-    """Create custom spec file for PyInstaller"""
-    spec_content = '''# -*- mode: python ; coding: utf-8 -*-
-
-from PyInstaller.utils.hooks import collect_all
-
-block_cipher = None
-
-# Collect all necessary data
-datas = [
-    ('data_template.xlsx', '.'),
-    ('.env', '.'),
-    ('downloads', 'downloads'),
-    ('static', 'static')
-]
-
-binaries = []
-hiddenimports = [
-    'pdfkit',
-    'PIL',
-    'selenium',
-    'pandas',
-    'openpyxl',
-    'tenacity',
-    'cffi',
-    'selenium.webdriver',
-    'selenium.webdriver.common.by',
-    'selenium.webdriver.support.ui',
-    'selenium.webdriver.support.expected_conditions',
-    'selenium.common.exceptions',
-    'selenium.webdriver.common.action_chains',
-    'packaging.version',
-    'packaging.specifiers',
-    'packaging.requirements'
-]
-
-if sys.platform == 'win32':
-    hiddenimports.extend([
-        'win32api',
-        'win32con',
-        'win32gui',
-        'ctypes.wintypes',
-        'win32com.client'
-    ])
-
-# Collect additional dependencies
-tmp_ret = collect_all('pandas')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-
-a = Analysis(
-    ['fetch_co.py'],
-    pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=['hook-runtime.py'],
-    excludes=['pkg_resources.py2_warn', 'pkg_resources._vendor.packaging'],  # Thêm vào đây
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
-    noarchive=False
+# Cấu hình logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('build.log')
+    ]
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+class BuildError(Exception):
+    """Custom exception for build errors"""
+    pass
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='customs_fetcher',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,  # Tắt UPX để tránh một số vấn đề
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,
-    disable_windowed_traceback=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-)'''
+class BuildManager:
+    def __init__(self):
+        self.platform = sys.platform
+        self.dist_dir = Path('dist')
+        self.build_dir = Path('build')
+        self.required_files = ['data_template.xlsx', '.env']
+        self.required_dirs = ['downloads', 'static']
 
-    # Add sys import to the beginning of the spec file
-    spec_content = "import sys\n" + spec_content
+    def verify_environment(self) -> Tuple[bool, List[str]]:
+        """Verify all required components are present"""
+        missing = []
 
-    with open('customs_fetcher.spec', 'w') as f:
-        f.write(spec_content)
-    print("✓ Created PyInstaller spec file")
+        # Check Python version
+        if sys.version_info < (3, 8):
+            missing.append(f"Python 3.8+ required (current: {sys.version})")
 
-def build_application():
-    """Build the application"""
-    try:
-        # Platform-specific preparations
-        if sys.platform == 'darwin':  # macOS
-            check_macos_dependencies()
-        elif sys.platform == 'win32':  # Windows
-            print("Checking if wkhtmltopdf is installed...")
+        # Check required files
+        for file in self.required_files:
+            if not os.path.exists(file):
+                missing.append(f"Missing required file: {file}")
+
+        # Check wkhtmltopdf installation
+        try:
+            subprocess.run(['wkhtmltopdf', '--version'],
+                         check=True, capture_output=True)
+        except:
+            missing.append("wkhtmltopdf not installed or not in PATH")
+
+        return len(missing) == 0, missing
+
+    def clean_build_directories(self):
+        """Safely clean build directories"""
+        paths_to_clean = ['build', 'dist', '__pycache__']
+        for path in paths_to_clean:
             try:
-                # Try to run wkhtmltopdf to check if it's installed
-                subprocess.run(['wkhtmltopdf', '--version'],
-                             check=True,
-                             stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-                print("✓ wkhtmltopdf is installed")
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                print("wkhtmltopdf is not installed. Please install from: https://wkhtmltopdf.org/downloads.html")
-                print("After installation, add it to your PATH or specify its location in pdf_generator.py")
-                input("Press Enter to continue after installing wkhtmltopdf...")
+                if os.path.exists(path):
+                    shutil.rmtree(path)
+                    logging.info(f"Cleaned {path} directory")
+            except Exception as e:
+                logging.warning(f"Failed to clean {path}: {e}")
 
-        # Install Python requirements
-        install_requirements()
+    def install_dependencies(self):
+        """Install and verify dependencies"""
+        try:
+            # Upgrade pip
+            subprocess.run([sys.executable, '-m', 'pip', 'install', '--upgrade', 'pip'],
+                         check=True, capture_output=True)
 
-        # Prepare project files
-        prepare_project_files()
+            # Install requirements with retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'],
+                                 check=True, capture_output=True)
+                    break
+                except subprocess.CalledProcessError as e:
+                    if attempt == max_retries - 1:
+                        raise BuildError(f"Failed to install requirements: {e}")
+                    time.sleep(2)
 
-        # Create runtime hook
-        create_runtime_hook()
+            logging.info("Successfully installed all dependencies")
+        except Exception as e:
+            raise BuildError(f"Dependency installation failed: {e}")
 
-        # Create spec file
-        create_spec_file()
+    def prepare_build_environment(self):
+        """Prepare build environment with error handling"""
+        try:
+            # Create necessary directories
+            for dir_name in self.required_dirs:
+                os.makedirs(dir_name, exist_ok=True)
+                logging.info(f"Created directory: {dir_name}")
 
-        # Build using PyInstaller with minimal options
-        print("\nBuilding application...")
-
-        # Use a more verbose command for better debugging
-        pyinstaller_cmd = [
-            sys.executable,
-            '-m',
-            'PyInstaller',
-            'customs_fetcher.spec',
-            '--clean',
-            '--noconfirm',
-            '--noupx',  # Thêm cờ này
-            '--log-level=DEBUG'
-        ]
-
-        # Print command for debugging
-        print(f"Running command: {' '.join(pyinstaller_cmd)}")
-
-        # Run PyInstaller with subprocess to capture all output
-        process = subprocess.run(
-            pyinstaller_cmd,
-            check=False,  # Don't raise exception on non-zero return code
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-
-        # Print output for debugging
-        print("STDOUT:")
-        print(process.stdout)
-
-        print("STDERR:")
-        print(process.stderr)
-
-        if process.returncode != 0:
-            print(f"PyInstaller returned with error code: {process.returncode}")
-            return False
-
-        # Post-build cleanup and verification
-        dist_dir = Path('dist')
-        output_file = 'customs_fetcher.exe' if sys.platform == 'win32' else 'customs_fetcher'
-        output_path = dist_dir / output_file
-
-        if output_path.exists():
-            print(f"\n✓ Build successful! Output file: {output_path}")
-
-            # Copy necessary files to dist directory
-            for file in ['data_template.xlsx', '.env']:
+            # Copy required files to build directory
+            os.makedirs('build', exist_ok=True)
+            for file in self.required_files:
                 if os.path.exists(file):
-                    shutil.copy2(file, dist_dir / file)
-                    print(f"✓ Copied {file} to dist/")
+                    shutil.copy2(file, f'build/{file}')
+                    logging.info(f"Copied {file} to build/")
+                else:
+                    raise BuildError(f"Required file missing: {file}")
 
-            # Create downloads directory in dist
-            os.makedirs(dist_dir / 'downloads', exist_ok=True)
-            print("✓ Created downloads directory in dist/")
-        else:
-            print("\n❌ Build failed: Output file not found")
+        except Exception as e:
+            raise BuildError(f"Failed to prepare build environment: {e}")
+
+    def run_pyinstaller(self) -> bool:
+        """Run PyInstaller with improved error handling"""
+        try:
+            cmd = [
+                sys.executable,
+                '-m',
+                'PyInstaller',
+                'customs_fetcher.spec',
+                '--clean',
+                '--noconfirm',
+                '--log-level=DEBUG'
+            ]
+
+            logging.info(f"Running PyInstaller command: {' '.join(cmd)}")
+
+            process = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False
+            )
+
+            # Log output
+            if process.stdout:
+                logging.info("PyInstaller STDOUT:\n" + process.stdout)
+            if process.stderr:
+                logging.warning("PyInstaller STDERR:\n" + process.stderr)
+
+            if process.returncode != 0:
+                raise BuildError(f"PyInstaller failed with return code {process.returncode}")
+
+            return True
+
+        except Exception as e:
+            raise BuildError(f"PyInstaller execution failed: {e}")
+
+    def verify_build_output(self):
+        """Verify build output and copy necessary files"""
+        try:
+            output_file = 'customs_fetcher.exe' if self.platform == 'win32' else 'customs_fetcher'
+            output_path = self.dist_dir / output_file
+
+            if not output_path.exists():
+                raise BuildError("Build output file not found")
+
+            # Verify file size
+            size = output_path.stat().st_size
+            if size < 1000000:  # Less than 1MB
+                raise BuildError(f"Build output suspiciously small: {size} bytes")
+
+            # Copy additional files
+            for file in self.required_files:
+                if os.path.exists(file):
+                    shutil.copy2(file, self.dist_dir / file)
+                    logging.info(f"Copied {file} to dist/")
+
+            # Create necessary directories in dist
+            for dir_name in self.required_dirs:
+                os.makedirs(self.dist_dir / dir_name, exist_ok=True)
+                logging.info(f"Created {dir_name} directory in dist/")
+
+            logging.info(f"Build verified successfully: {output_path}")
+            return True
+
+        except Exception as e:
+            raise BuildError(f"Build verification failed: {e}")
+
+    def build(self) -> bool:
+        """Main build process with comprehensive error handling"""
+        try:
+            logging.info(f"Starting build process for {platform.system()} ({self.platform})")
+
+            # Verify environment
+            is_valid, missing = self.verify_environment()
+            if not is_valid:
+                raise BuildError(f"Environment verification failed:\n" + "\n".join(missing))
+
+            # Clean previous build
+            self.clean_build_directories()
+
+            # Install dependencies
+            self.install_dependencies()
+
+            # Prepare environment
+            self.prepare_build_environment()
+
+            # Run PyInstaller
+            self.run_pyinstaller()
+
+            # Verify output
+            self.verify_build_output()
+
+            logging.info("Build completed successfully!")
+            return True
+
+        except BuildError as e:
+            logging.error(f"Build failed: {e}")
             return False
-
-        return True
-
-    except Exception as e:
-        print(f"\n❌ Build failed with error: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        except Exception as e:
+            logging.error(f"Unexpected error during build: {e}")
+            return False
 
 if __name__ == "__main__":
-    print(f"Building for: {platform.system()} ({sys.platform})")
-    success = build_application()
+    builder = BuildManager()
+    success = builder.build()
     sys.exit(0 if success else 1)

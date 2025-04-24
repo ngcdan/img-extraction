@@ -1,6 +1,7 @@
 
 # Chrome profiles
 chrome_profiles/
+build.log
 
 # Environment variables
 .env

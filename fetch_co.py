@@ -29,6 +29,19 @@ def access_page_with_retry(driver, url, max_retries=3, delay_between_retries=5):
             current_url = driver.current_url
             print(f"URL hiện tại: {current_url}")
 
+            # Kiểm tra lỗi 404
+            try:
+                error_404 = driver.find_element(
+                    By.XPATH,
+                    '//h2[normalize-space()="404 - File or directory not found."]'
+                )
+                if error_404.is_displayed():
+                    print("Phát hiện lỗi 404, đợi 5s và thử lại...")
+                    time.sleep(5)
+                    continue
+            except:
+                pass  # Không tìm thấy lỗi 404, tiếp tục kiểm tra
+
             # Kiểm tra các trường hợp cần reload
             if (current_url == "about:blank" or
                 "ContainerBarcode;jsessionid=" in current_url):
@@ -158,6 +171,46 @@ def read_customs_data():
         print(f"Lỗi khi đọc file Excel: {str(e)}")
         return []
 
+def wait_for_button_clickable(driver, max_retries=3, delay=2):
+    """
+    Đợi cho đến khi button có thể click được
+    Returns: WebElement nếu thành công, None nếu thất bại
+    """
+    for attempt in range(max_retries):
+        try:
+            # Đợi cho đến khi element xuất hiện và có thể click
+            wait = WebDriverWait(driver, 10)
+            button = wait.until(
+                EC.element_to_be_clickable(
+                    (By.CSS_SELECTOR, 'div[id="pt1:btngetdata"] span[class="xfx"]')
+                )
+            )
+
+            # Kiểm tra thêm các thuộc tính của button
+            if button.is_displayed() and button.is_enabled():
+                print("Đã tìm thấy button và có thể click")
+                return button
+
+        except Exception as e:
+            print(f"Lần {attempt + 1}: Không thể tìm thấy button - {str(e)}")
+
+            if attempt < max_retries - 1:
+                print(f"Chờ {delay}s và thử lại...")
+                # Thử scroll đến vị trí button
+                try:
+                    driver.execute_script(
+                        'document.querySelector(\'div[id="pt1:btngetdata"] span[class="xfx"]\').scrollIntoView(true);'
+                    )
+                except:
+                    pass
+
+                time.sleep(delay)
+            else:
+                print("Đã hết số lần thử")
+                return None
+
+    return None
+
 def main():
     customs_data = read_customs_data()
 
@@ -178,34 +231,31 @@ def main():
         # Clear tất cả cookies và sessions
         CookieManager.clear_all_cookies_and_sessions(driver)
 
-        # Refresh session trước khi bắt đầu
-        # if not refresh_session(driver):
-        #     print("Cảnh báo: Không thể truy cập trang chủ hải quan")
-
         # Truy cập trang với retry được cải thiện
         base_url = "https://pus.customs.gov.vn/faces/ContainerBarcode"
         if not access_page_with_retry(driver, base_url):
             raise Exception("Không thể truy cập trang sau nhiều lần thử")
 
-        # Wait for elements to be present
-        wait = WebDriverWait(driver, 30)
-        short_wait = WebDriverWait(driver, 2)  # wait ngắn để check nhanh
+        button = wait_for_button_clickable(driver)
+        if button is None:
+            raise Exception("Không thể tìm thấy hoặc click vào button sau nhiều lần thử")
 
-        # client = CustomApiClient()
+        wait = WebDriverWait(driver, 10)
+
+        client = CustomApiClient()
 
         for customs_item in customs_data:
             print(f"\nXử lý dữ liệu tờ khai: {customs_item['custom_no']}")
 
-            # result = client.fetch_customs_location_by_name(customs_item['custom_name'])
-            # records = parse_response(result.data)
+            result = client.fetch_customs_location_by_name(customs_item['custom_name'])
+            records = parse_response(result.data)
+            # Lấy code của record đầu tiên nếu có
+            custom_code = records[0]['code'] if records else ""
 
-            # # Lấy code của record đầu tiên nếu có
-            # custom_code = records[0]['code'] if records else ""
-
-            # # Skip loop nếu custom_code trống
-            # if not custom_code:
-            #     print(f"Không tìm thấy mã hải quan cho {customs_item['custom_name']}, bỏ qua...")
-            #     continue
+            # Skip loop nếu custom_code trống
+            if not custom_code:
+                print(f"Không tìm thấy mã hải quan cho {customs_item['custom_name']}, bỏ qua...")
+                continue
 
             # Fill tax code
             tax_code_input = wait.until(EC.presence_of_element_located((By.ID, "pt1:it1::content")))
@@ -220,16 +270,12 @@ def main():
             # Fill custom name
             custom_name_input = wait.until(EC.presence_of_element_located((By.ID, "pt1:it3::content")))
             custom_name_input.clear()
-            custom_name_input.send_keys(customs_item['custom_name'])
+            custom_name_input.send_keys(custom_code)
 
             # Fill date register
             date_register_input = wait.until(EC.presence_of_element_located((By.ID, "pt1:it4::content")))
             date_register_input.clear()
             date_register_input.send_keys(customs_item['date_register'])
-
-            # Đợi cho đến khi button xuất hiện và có thể click được
-            wait = WebDriverWait(driver, 10)
-            button = wait.until(EC.element_to_be_clickable((By.ID, "pt1:btngetdata")))
 
             max_attempts = 3  # Số lần thử tối đa
             for attempt in range(max_attempts):

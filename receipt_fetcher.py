@@ -148,6 +148,7 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
         drive_upload_results = []
         download_results = []
+
         # 1. Trích xuất thông tin từ files
         extracted_results, cached_extracted_files = extract_files_info(files)
 
@@ -260,46 +261,39 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
 
         # Xử lý các kết quả đã match
         if matched_results:
-            # Query database để lấy thêm thông tin từ API
-            customs_numbers = [result['custom_no'] for result in matched_results]
+            for result in matched_results:
+                customs_no = result['custom_no']
+                try:
+                    api_client = CustomApiClient()
+                    api_result = api_client.fetch_customs_data([customs_no])
 
-            try:
-                api_client = CustomApiClient()
-                api_result = api_client.fetch_customs_data(customs_numbers)
-                if api_result.status == "OK":
-                    db_results = parse_response(api_result.data)
-                    db_data = {}
-                    for customs_no in customs_numbers:
-                        search_customs_no = customs_no
-                        if len(customs_no) == 12:
-                            search_customs_no = customs_no[:-1]
-                        matching_row = next(
-                            (row for row in db_results if search_customs_no in row['customs_no']),
-                            None
-                        )
+                    if api_result.status == "OK":
+                        db_results = parse_response(api_result.data)
+                        if db_results:
+                            search_customs_no = customs_no
+                            if len(customs_no) == 12:
+                                search_customs_no = customs_no[:-1]
 
-                        if matching_row:
-                            db_data[customs_no] = {
-                                'jobId': str(matching_row['TransID']),
-                                'hawb': matching_row['hawb'],
-                                'partner_id': matching_row['PartnerID'],
-                                'partner_name': matching_row['PartnerName3']
-                            }
+                            matching_row = next(
+                                (row for row in db_results if search_customs_no in row['customs_no']),
+                                None
+                            )
 
-                    for result in matched_results:
-                        customs_no = result['custom_no']
-                        if customs_no in db_data:
-                            result.update({
-                                'jobId': db_data[customs_no]['jobId'],
-                                'hawb': db_data[customs_no]['hawb'],
-                                'partner_invoice_id': db_data[customs_no]['partner_id'],
-                                'partner_invoice_name': db_data[customs_no]['partner_name']
-                            })
-                        else:
-                            print(f"Không tìm thấy dữ liệu trong API cho customs number: {customs_no}")
+                            if matching_row:
+                                result.update({
+                                    'jobId': str(matching_row['TransID']),
+                                    'hawb': matching_row['hawb'],
+                                    'partner_invoice_id': matching_row['PartnerID'],
+                                    'partner_invoice_name': matching_row['PartnerName3']
+                                })
+                            else:
+                                print(f"Không tìm thấy dữ liệu trong API cho customs number: {customs_no}")
+                    else:
+                        print(f"API trả về lỗi cho customs number: {customs_no}")
 
-            except Exception as e:
-                print(f"Lỗi khi query API: {str(e)}")
+                except Exception as e:
+                    print(f"Lỗi khi query API cho customs number {customs_no}: {str(e)}")
+                    continue
 
             success_count = process_matched_results(driver, matched_results, extracted_results)
 
@@ -497,14 +491,12 @@ def process_and_upload_invoices_batch(invoice_batch):
                 job_id_prefix = f"{job_id}-"
 
             filename = f"{job_id_prefix}CSHT{invoice_info['invoice_no']}.pdf"
-
             files_to_upload.append({
                 'content': pdf_data,
                 'filename': filename,
                 'date_folder': ngay_formatted,
                 'invoice_no': invoice_info['invoice_no']
             })
-
             sheet_rows.append(invoice_info)
 
         # Batch upload files to Drive
@@ -561,7 +553,6 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
 
                 if os.path.exists(source_path):
                     shutil.move(source_path, dest_path)
-                    print(f"Đã chuyển file {source_file} sang thư mục success")
                     return True
             return False
         except Exception as e:
@@ -574,8 +565,6 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
         if pdf_data:
             # Đưa kết quả vào hàng đợi
             result_queue.put((invoice_info, pdf_data))
-            print(f"Đã download biên lai {invoice_info['invoice_no']}")
-
             # Di chuyển file nguồn trong thread riêng
             move_thread = threading.Thread(target=move_source_file, args=(invoice_info,))
             move_thread.daemon = True

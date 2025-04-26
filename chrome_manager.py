@@ -47,12 +47,13 @@ class ChromeManager:
     HOME_URL = "http://thuphi.haiphong.gov.vn:8222/Home"
 
     @staticmethod
-    def initialize_chrome(max_retries: int = 3, auto_login: bool = True) -> Optional[webdriver.Chrome]:
+    def initialize_chrome(max_retries: int = 3, auto_login: bool = True, headless: bool = False) -> Optional[webdriver.Chrome]:
         """Khởi tạo Chrome và tự động đăng nhập nếu được yêu cầu
 
         Args:
             max_retries: Số lần thử lại tối đa khi khởi tạo Chrome
             auto_login: Tự động đăng nhập sau khi khởi tạo Chrome
+            headless: Chạy Chrome trong chế độ headless
 
         Returns:
             WebDriver instance hoặc None nếu không thể khởi tạo
@@ -65,10 +66,16 @@ class ChromeManager:
                 # Thiết lập options tối thiểu cho Chrome để mở nhanh nhất
                 chrome_options = webdriver.ChromeOptions()
 
-                # Tắt các log và warning
-                chrome_options.add_argument('--log-level=3')  # Chỉ hiển thị lỗi nghiêm trọng
-                chrome_options.add_argument('--silent')  # Chế độ im lặng
-                chrome_options.add_argument('--disable-logging')  # Tắt logging
+                # Thêm headless mode nếu được yêu cầu
+                if headless:
+                    chrome_options.add_argument('--headless=new')  # Sử dụng headless mode mới
+                    chrome_options.add_argument('--window-size=1920,1080')  # Đặt kích thước cửa sổ
+                    chrome_options.add_argument('--start-maximized')  # Maximize window
+
+                # Các options hiện tại
+                chrome_options.add_argument('--log-level=3')
+                chrome_options.add_argument('--silent')
+                chrome_options.add_argument('--disable-logging')
                 chrome_options.add_argument('--disable-dev-shm-usage')  # Tránh lỗi shared memory
                 chrome_options.add_argument('--disable-gpu')  # Tắt GPU (giúp tránh nhiều warning)
                 chrome_options.add_argument('--disable-infobars')  # Tắt infobar
@@ -115,8 +122,6 @@ class ChromeManager:
                     service = Service(ChromeDriverManager().install())
                     driver = webdriver.Chrome(service=service, options=chrome_options)
 
-                print("Đã khởi tạo Chrome thành công")
-
                 # Nếu cần đăng nhập tự động
                 if auto_login and login_credentials:
                     try:
@@ -131,7 +136,6 @@ class ChromeManager:
                                 driver.get(base_url)
                                 # Đợi một chút để đảm bảo trang đã load
                                 time.sleep(1)
-                                print("Xóa cookies của domain trước khi đăng nhập...")
                                 driver.delete_all_cookies()
                                 break
                             except Exception as e:

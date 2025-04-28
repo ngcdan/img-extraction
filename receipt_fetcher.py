@@ -473,6 +473,7 @@ def process_and_upload_invoices_batch(invoice_batch):
 
         for invoice_info, pdf_data in invoice_batch:
             ngay_formatted = invoice_info['ngay'].replace('/', '') if invoice_info.get('ngay') else datetime.now().strftime('%d%m%Y')
+            print(json.dumps(invoice_info, indent=2, ensure_ascii=False))
 
             # Xử lý jobId nếu có
             job_id_prefix = ""
@@ -584,6 +585,8 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
                 # Validate PDF trước khi thêm vào kết quả
                 source_file = customs_to_file.get(invoice_info.get('custom_no'))
                 if source_file:
+                    invoice_info['source_file'] = source_file
+
                     source_path = os.path.join(customs_dir, source_file)
                     if validate_pdf_match(source_path, pdf_data):
                         downloaded_results.append((invoice_info, pdf_data))

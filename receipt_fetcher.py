@@ -31,11 +31,12 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Tuple, Optional, Set
 from pdfminer.high_level import extract_text
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload
+# Remove Google Drive imports - now using local storage
+# from google.oauth2 import service_account
+# from googleapiclient.discovery import build
+# from googleapiclient.http import MediaIoBaseUpload
 
-from google_drive_utils import batch_upload_to_drive
+from local_storage_utils import batch_save_to_local, get_storage_info, open_downloads_folder
 from google_sheet_utils import batch_append_to_sheet
 
 from pdf_invoice_parser import (
@@ -82,10 +83,13 @@ def extract_files_info(files: List[str]) -> Tuple[List[Dict], Dict]:
 
             header_info = extract_header_info(sections['header'])
             if header_info:
-                header_info.update({
+                # Create enhanced header info with processing metadata
+                enhanced_header = {
+                    **header_info,
                     'processed_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     'source_file': os.path.basename(file_path)
-                })
+                }
+                header_info = enhanced_header
 
                 customs_no = header_info.get('customs_number')
                 if customs_no:
@@ -288,7 +292,14 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     print(f"Lỗi khi query API cho customs number {customs_no}: {str(e)}")
                     continue
 
+            # Kiểm tra storage trước khi xử lý
+            storage_ok, free_space, usage_percent = get_storage_info()
+            if not storage_ok:
+                print(f"⚠️  Cảnh báo: Dung lượng ổ đĩa không đủ để lưu files!")
+
             success_count = process_matched_results(driver, matched_results, extracted_results)
+        else:
+            success_count = 0
 
         download_results.append({
             'status': 'success' if success_count > 0 else 'error',
@@ -462,13 +473,13 @@ def download_invoice_pdf(driver, invoice_info, lock=None, max_retries=2):
             if lock and lock.locked():
                 lock.release()
 
-def process_and_upload_invoices_batch(invoice_batch):
+def process_and_save_invoices_batch(invoice_batch):
     """
-    Upload nhiều PDF lên drive và append sheet theo batch
+    Lưu nhiều PDF về local storage và append sheet theo batch
     """
     try:
-        # Chuẩn bị data cho batch upload
-        files_to_upload = []
+        # Chuẩn bị data cho batch save
+        files_to_save = []
         sheet_rows = []
 
         for invoice_info, pdf_data in invoice_batch:
@@ -485,7 +496,7 @@ def process_and_upload_invoices_batch(invoice_batch):
                 job_id_prefix = f"{job_id}-"
 
             filename = f"{job_id_prefix}CSHT{invoice_info['invoice_no']}.pdf"
-            files_to_upload.append({
+            files_to_save.append({
                 'content': pdf_data,
                 'filename': filename,
                 'date_folder': ngay_formatted,
@@ -493,15 +504,16 @@ def process_and_upload_invoices_batch(invoice_batch):
             })
             sheet_rows.append(invoice_info)
 
-        # Batch upload files to Drive
-        upload_results = batch_upload_to_drive(files_to_upload)
-        print(f"Đã upload {len(upload_results)} files lên Drive")
+        # Batch save files to local storage
+        save_results = batch_save_to_local(files_to_save)
+        successful_saves = sum(1 for r in save_results if r['success'])
+        print(f"📁 Đã lưu {successful_saves}/{len(save_results)} files về local")
 
         # Batch append to sheet
         append_result = batch_append_to_sheet(sheet_rows)
-        print(f"Đã append {len(sheet_rows)} dòng vào sheet")
+        print(f"📝 Đã append {len(sheet_rows)} dòng vào sheet")
 
-        return True
+        return successful_saves > 0
 
     except Exception as e:
         print(f"Lỗi khi xử lý batch: {str(e)}")
@@ -570,6 +582,7 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
                             shutil.move(source_path, dest_path)
                             moved_count += 1
                 except Exception as e:
+                    customs_no = invoice_info.get('custom_no', 'unknown')
                     print(f"Lỗi khi di chuyển file {customs_no}: {str(e)}")
         return moved_count
 
@@ -603,7 +616,7 @@ def process_matched_results(driver, matched_results, extracted_results, batch_si
     for i in range(0, len(downloaded_results), batch_size):
         current_batch = downloaded_results[i:i + batch_size]
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future = executor.submit(process_and_upload_invoices_batch, current_batch)
+            future = executor.submit(process_and_save_invoices_batch, current_batch)
             try:
                 if future.result():
                     # Chỉ di chuyển file khi upload và append thành công

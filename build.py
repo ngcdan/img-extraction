@@ -131,20 +131,17 @@ def build_application(show_console=True):
 
     # Platform specific options
     if sys.platform == 'win32':
-        options.extend([
-            '--uac-admin',        # Request admin privileges
-            f'--icon={icon_path}' if icon_path else None
-        ])
+        options.append('--uac-admin')        # Request admin privileges
+        if icon_path:
+            options.append(f'--icon={icon_path}')
 
         # Add --noconsole only if show_console is False
         if not show_console:
             options.append('--noconsole')
 
     else:  # macOS
-        options.extend([
-            f'--icon={icon_path}' if icon_path else None
-        ])
-
+        if icon_path:
+            options.append(f'--icon={icon_path}')
     # Add data files
     for src, dest in data_files:
         separator = ';' if sys.platform == 'win32' else ':'

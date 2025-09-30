@@ -335,7 +335,7 @@ def batch_append_to_sheet(rows):
                     '', # tax
                     row.get('total_amount', ''),
                     row.get('tax_number', '') != '0303482440',
-                    f"'{row.get('invoice_no', '').zfill(8)}",
+                    f"'{row.get('invoice_no', '')}",
                     row.get('seriesNo', ''),
                     row.get('ngay', ''),
                     row.get('partner_invoice_id', ''),

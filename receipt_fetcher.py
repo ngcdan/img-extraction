@@ -227,9 +227,18 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     raw_series_no = cells[7].text.strip() if len(cells) > 7 else ''
                     seriesNo = raw_series_no.split('/')[-1].strip() if '/' in raw_series_no else raw_series_no
 
+                    # Debug: Kiểm tra giá trị invoice_no từ web page
+                    raw_invoice_no = cells[8].text.strip() if len(cells) > 8 else ''
+                    print(f"DEBUG - RAW invoice_no từ web: '{raw_invoice_no}' (type: {type(raw_invoice_no)})")
+                    print(f"DEBUG - Raw invoice_no repr: {repr(raw_invoice_no)}")
+
+                    # Đảm bảo giữ nguyên dạng string, không convert số
+                    invoice_no_final = str(raw_invoice_no) if raw_invoice_no else ''
+                    print(f"DEBUG - Final invoice_no: '{invoice_no_final}' (type: {type(invoice_no_final)})")
+
                     matched_result = {
                         'custom_no': found_custom_no,
-                        'invoice_no': cells[8].text.strip() if len(cells) > 8 else '',
+                        'invoice_no': invoice_no_final,
                         'seriesNo': seriesNo,
                         'ngay': cells[9].text.strip() if len(cells) > 9 else '',
                         'total_amount': convert_price_to_number(cells[11].text.strip()) if len(cells) > 11 else 0,

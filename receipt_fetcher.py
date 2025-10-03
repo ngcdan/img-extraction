@@ -232,11 +232,29 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                     print(f"DEBUG - RAW invoice_no từ web: '{raw_invoice_no}' (type: {type(raw_invoice_no)})")
                     print(f"DEBUG - Raw invoice_no repr: {repr(raw_invoice_no)}")
 
-                    # Đảm bảo giữ nguyên dạng string, không convert số
-                    invoice_no_final = str(raw_invoice_no) if raw_invoice_no else ''
-                    print(f"DEBUG - Final invoice_no: '{invoice_no_final}' (type: {type(invoice_no_final)})")
+                    # Debug: Kiểm tra HTML raw của cell
+                    if len(cells) > 8:
+                        html_content = cells[8].get_attribute('innerHTML')
+                        print(f"DEBUG - HTML content của cell[8]: {repr(html_content)}")
 
-                    matched_result = {
+                        # Thử lấy từ các attribute khác
+                        value_attr = cells[8].get_attribute('value')
+                        title_attr = cells[8].get_attribute('title')
+                        data_value = cells[8].get_attribute('data-value')
+                        print(f"DEBUG - value attribute: {repr(value_attr)}")
+                        print(f"DEBUG - title attribute: {repr(title_attr)}")
+                        print(f"DEBUG - data-value attribute: {repr(data_value)}")
+
+                    # Thử khôi phục số 0 bằng cách thêm vào đầu nếu thiếu
+                    if raw_invoice_no and raw_invoice_no.isdigit() and len(raw_invoice_no) == 6:
+                        # Nếu là 6 chữ số, có thể thiếu số 0 ở đầu
+                        invoice_no_final = '0' + raw_invoice_no
+                        print(f"DEBUG - Đã thêm số 0: '{invoice_no_final}'")
+                    else:
+                        invoice_no_final = str(raw_invoice_no) if raw_invoice_no else ''
+                        print(f"DEBUG - Giữ nguyên: '{invoice_no_final}'")
+
+                    print(f"DEBUG - Final invoice_no: '{invoice_no_final}' (type: {type(invoice_no_final)})")                    matched_result = {
                         'custom_no': found_custom_no,
                         'invoice_no': invoice_no_final,
                         'seriesNo': seriesNo,

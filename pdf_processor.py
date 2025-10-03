@@ -3,29 +3,15 @@ import sys
 import platform
 import argparse
 from receipt_fetcher import batch_process_files
+import tkinter as tk
+from tkinter import messagebox
 from utils import get_default_customs_dir
-
-# Try to import tkinter, fallback to console if not available
-try:
-    import tkinter as tk
-    from tkinter import messagebox
-    TKINTER_AVAILABLE = True
-except ImportError:
-    TKINTER_AVAILABLE = False
-    print("Warning: Tkinter not available, using console output only")
 
 # Suppress Tk deprecation warning
 os.environ['TK_SILENCE_DEPRECATION'] = '1'
 
 def show_message_dialog(message, title="Thông báo"):
     """Hiển thị dialog thông báo trên cả Windows và macOS"""
-    if not TKINTER_AVAILABLE:
-        # Fallback to console output
-        print(f"\n{title}: {message}")
-        if platform.system() != 'Darwin':  # Not macOS
-            input("Nhấn Enter để tiếp tục...")
-        return
-
     try:
         # Tạo root window
         root = tk.Tk()
@@ -43,7 +29,7 @@ def show_message_dialog(message, title="Thông báo"):
         root.destroy()
     except Exception as e:
         # Fallback về print nếu có lỗi với GUI
-        print(f"\n{title}: {message}")
+        print(message)
         if platform.system() == 'Windows':
             input("Nhấn Enter để thoát...")
 

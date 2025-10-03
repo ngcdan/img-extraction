@@ -254,7 +254,9 @@ def batch_process_files(files: List[str]) -> Dict[str, Any]:
                         invoice_no_final = str(raw_invoice_no) if raw_invoice_no else ''
                         print(f"DEBUG - Giữ nguyên: '{invoice_no_final}'")
 
-                    print(f"DEBUG - Final invoice_no: '{invoice_no_final}' (type: {type(invoice_no_final)})")                    matched_result = {
+                    print(f"DEBUG - Final invoice_no: '{invoice_no_final}' (type: {type(invoice_no_final)})")
+
+                    matched_result = {
                         'custom_no': found_custom_no,
                         'invoice_no': invoice_no_final,
                         'seriesNo': seriesNo,

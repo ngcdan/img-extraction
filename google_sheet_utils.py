@@ -296,34 +296,8 @@ def batch_append_to_sheet(rows):
     Append nhiều dòng vào sheet cùng lúc
     """
     try:
-        # Debug: Print toàn bộ input data
-        print("=" * 60)
-        print("DEBUG - BATCH_APPEND_TO_SHEET INPUT:")
-        print(f"DEBUG - Số lượng rows: {len(rows)}")
-        print(f"DEBUG - Type của rows: {type(rows)}")
-
-        for i, row in enumerate(rows):
-            print(f"\nDEBUG - Row {i}:")
-            print(f"DEBUG - Type của row: {type(row)}")
-            print(f"DEBUG - Keys trong row: {list(row.keys()) if isinstance(row, dict) else 'Không phải dict'}")
-            print(f"DEBUG - Toàn bộ row data: {json.dumps(row, ensure_ascii=False, indent=2) if isinstance(row, (dict, list)) else str(row)}")
-
-            # Debug chi tiết invoice_no
-            if isinstance(row, dict):
-                invoice_no_raw = row.get('invoice_no')
-                print(f"DEBUG - invoice_no RAW: {repr(invoice_no_raw)} (type: {type(invoice_no_raw)})")
-
-                # Kiểm tra tất cả các key có chứa 'invoice' hoặc tương tự
-                invoice_related_keys = [k for k in row.keys() if 'invoice' in k.lower() or 'inv' in k.lower()]
-                if invoice_related_keys:
-                    print(f"DEBUG - Invoice related keys: {invoice_related_keys}")
-                    for key in invoice_related_keys:
-                        print(f"DEBUG - {key}: {repr(row[key])} (type: {type(row[key])})")
-
-        print("=" * 60)
-
         sheet_instance = SheetService.get_instance()
-        sheet = sheet_instance.service.spreadsheets()  # Thêm .spreadsheets()
+        sheet = sheet_instance.service.spreadsheets()
 
         # Group rows by date
         date_groups = {}
@@ -347,21 +321,16 @@ def batch_append_to_sheet(rows):
                     'unit': 'shipment'
                 }
 
-                # Debug: Print invoice_no value với nhiều cách lấy khác nhau
+                # Format invoice_no để đảm bảo có đủ 7 chữ số
                 invoice_no_value = row.get('invoice_no', '')
-                print(f"\nDEBUG - PROCESSING ROW:")
-                print(f"DEBUG - invoice_no từ row.get('invoice_no'): '{invoice_no_value}' (type: {type(invoice_no_value)})")
-
-                # Thử các cách lấy khác nhau
-                alternative_keys = ['invoice_number', 'invoiceNo', 'invoice_id', 'invoice']
-                for alt_key in alternative_keys:
-                    alt_value = row.get(alt_key)
-                    if alt_value is not None:
-                        print(f"DEBUG - {alt_key}: '{alt_value}' (type: {type(alt_value)})")
-
-                # Giữ nguyên giá trị gốc, không format gì cả
-                invoice_no_final = str(invoice_no_value) if invoice_no_value else ''
-                print(f"DEBUG - invoice_no_final (không format): '{invoice_no_final}'")
+                if invoice_no_value and str(invoice_no_value).isdigit():
+                    invoice_no_str = str(invoice_no_value)
+                    if len(invoice_no_str) < 7:
+                        invoice_no_final = invoice_no_str.zfill(7)
+                    else:
+                        invoice_no_final = invoice_no_str
+                else:
+                    invoice_no_final = str(invoice_no_value) if invoice_no_value else ''
 
                 row_data = [
                     fixed_data['service_code'],
@@ -374,7 +343,7 @@ def batch_append_to_sheet(rows):
                     1,
                     fixed_data['unit'],
                     row.get('total_amount', ''),
-                    '', # tax
+                    '',  # tax
                     row.get('total_amount', ''),
                     row.get('tax_number', '') != '0303482440',
                     f"'{invoice_no_final}",
@@ -384,13 +353,9 @@ def batch_append_to_sheet(rows):
                     row.get('partner_invoice_name'),
                     row.get('source_file'),
                 ]
-
-                # Debug: Print row_data as JSON
-                print(f"DEBUG - row_data JSON: {json.dumps(row_data, ensure_ascii=False, indent=2)}")
-
                 values.append(row_data)
 
-            # execute_append(sheet, sheet_name, values)
+            execute_append(sheet, sheet_name, values)
 
         return True
 

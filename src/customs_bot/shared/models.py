@@ -54,7 +54,7 @@ class BatchResult(BaseModel):
     skipped: int = Field(ge=0)
 
     @model_validator(mode="after")
-    def _check_sum(self) -> "BatchResult":
+    def _check_sum(self) -> BatchResult:
         if self.succeeded + self.failed + self.skipped != self.total:
             raise ValueError("succeeded + failed + skipped must equal total")
         return self

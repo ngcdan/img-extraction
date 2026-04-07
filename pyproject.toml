@@ -44,7 +44,7 @@ customs-bot = "customs_bot.__main__:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "src"]
 pythonpath = ["src"]
 addopts = "-v --strict-markers"
 

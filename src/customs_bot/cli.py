@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import sys
+import contextlib
 from pathlib import Path
 
 from loguru import logger
@@ -17,7 +17,7 @@ from customs_bot.features.receipt_fetch.pipeline import PipelineDeps, process_in
 from customs_bot.features.receipt_fetch.scraper import find_mhd
 from customs_bot.features.storage import save_pdf
 from customs_bot.logging import setup_logging
-from customs_bot.shared.models import BatchResult, ReceiptStatus
+from customs_bot.shared.models import ReceiptStatus
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -102,10 +102,8 @@ def main(argv: list[str] | None = None) -> int:
             receipt = process_invoice(invoice, session.driver, settings.data_dir, deps)
             receipts.append(receipt)
     finally:
-        try:
+        with contextlib.suppress(Exception):
             session.driver.quit()
-        except Exception:
-            pass
 
     succeeded = sum(1 for r in receipts if r.status is ReceiptStatus.SUCCESS)
     failed = sum(1 for r in receipts if r.status is ReceiptStatus.FAILED)

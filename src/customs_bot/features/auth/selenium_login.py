@@ -5,6 +5,7 @@ Manual smoke test only — requires real Chrome + captcha. Run via the real CLI.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,10 +48,8 @@ def login(account: Account, *, headless: bool = False) -> SeleniumSession:
     logger.info("Submitting login form...")
     ok = ChromeManager.fill_login_info(driver, account.username, account.password)
     if not ok:
-        try:
+        with contextlib.suppress(Exception):
             driver.quit()
-        except Exception:
-            pass
         raise SeleniumLoginError(f"Login fail cho account {account.username}")
 
     cookies = driver.get_cookies() or []

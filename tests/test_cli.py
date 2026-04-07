@@ -32,3 +32,22 @@ def test_main_missing_data_dir_returns_2(tmp_path, monkeypatch):
     monkeypatch.setenv("CUSTOMS_BOT_DATA_DIR", str(tmp_path / "doesnotexist"))
     rc = main([])
     assert rc == 2
+
+
+def test_maybe_build_reporter_returns_none_without_spreadsheet_id(monkeypatch, tmp_path):
+    from customs_bot.cli import _maybe_build_reporter
+    from customs_bot.config import Settings
+    monkeypatch.delenv("CUSTOMS_BOT_SPREADSHEET_ID", raising=False)
+    monkeypatch.setenv("CUSTOMS_BOT_DATA_DIR", str(tmp_path))
+    settings = Settings()
+    assert _maybe_build_reporter(settings) is None
+
+
+def test_maybe_build_reporter_returns_none_without_service_account(monkeypatch, tmp_path):
+    from customs_bot.cli import _maybe_build_reporter
+    from customs_bot.config import Settings
+    monkeypatch.setenv("CUSTOMS_BOT_SPREADSHEET_ID", "sheet-id")
+    monkeypatch.setenv("CUSTOMS_BOT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CUSTOMS_BOT_SERVICE_ACCOUNT_FILE", str(tmp_path / "missing.json"))
+    settings = Settings()
+    assert _maybe_build_reporter(settings) is None

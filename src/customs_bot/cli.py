@@ -17,7 +17,7 @@ from customs_bot.features.receipt_fetch.pipeline import PipelineDeps, process_in
 from customs_bot.features.receipt_fetch.scraper import find_mhd
 from customs_bot.features.storage import save_pdf
 from customs_bot.logging import setup_logging
-from customs_bot.shared.models import ReceiptStatus
+from customs_bot.shared.models import BatchResult, ReceiptStatus
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -105,13 +105,14 @@ def main(argv: list[str] | None = None) -> int:
         with contextlib.suppress(Exception):
             session.driver.quit()
 
+    total = len(pdfs)
     succeeded = sum(1 for r in receipts if r.status is ReceiptStatus.SUCCESS)
     failed = sum(1 for r in receipts if r.status is ReceiptStatus.FAILED)
-    skipped = len(pdfs) - len(receipts)
-    total = len(pdfs)
+    skipped = total - len(receipts)
 
+    summary = BatchResult(total=total, succeeded=succeeded, failed=failed, skipped=skipped)
     logger.info(
         "Done: total={} succeeded={} failed={} skipped={}",
-        total, succeeded, failed, skipped,
+        summary.total, summary.succeeded, summary.failed, summary.skipped,
     )
-    return 0 if failed == 0 else 1
+    return 0 if summary.failed == 0 else 1

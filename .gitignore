@@ -110,3 +110,4 @@ htmlcov/
 
 # Phase 2 spike output (contains cookies)
 spike_output.json
+samples/

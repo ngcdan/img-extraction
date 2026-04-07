@@ -45,6 +45,19 @@ class Receipt(BaseModel):
     error: str | None = None
 
 
+class ReceiptSearchResult(BaseModel):
+    """Kết quả tra cứu biên lai từ API (trước khi download PDF)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    customs_number: str = Field(min_length=1)
+    mhd: str = Field(min_length=1)
+    trans_id: str | None = None
+    hawb: str | None = None
+    partner_name: str | None = None
+    raw: dict = Field(default_factory=dict)
+
+
 class BatchResult(BaseModel):
     """Tổng hợp kết quả 1 batch xử lý."""
 

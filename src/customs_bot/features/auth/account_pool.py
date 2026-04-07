@@ -22,7 +22,7 @@ class AccountPool:
         self._index = 0
 
     @classmethod
-    def load(cls, path: Path | str) -> "AccountPool":
+    def load(cls, path: Path | str) -> AccountPool:
         path = Path(path)
         raw = json.loads(path.read_text(encoding="utf-8"))
         accounts = [Account(**item) for item in raw]

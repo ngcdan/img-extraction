@@ -1,186 +1,195 @@
+"""PyInstaller build script for customs-receipt-bot v5.
+
+Packages ``src/customs_bot`` as a single-file executable using the
+``__main__.py`` entry point.
+"""
+
 import sys
 import subprocess
 import os
 from pathlib import Path
 import argparse
 import shutil
-import tempfile
 from PIL import Image
 
-def convert_to_ico(jpg_path, ico_path):
-    """Convert JPG to ICO format"""
+
+# ---------------------------------------------------------------------------
+# Icon helpers
+# ---------------------------------------------------------------------------
+
+def convert_to_ico(jpg_path: str, ico_path: Path) -> bool:
+    """Convert JPG to ICO format."""
     try:
         img = Image.open(jpg_path)
-        # Resize to standard icon sizes
-        icon_sizes = [(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)]
-        img.save(ico_path, format='ICO', sizes=icon_sizes)
+        icon_sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
+        img.save(ico_path, format="ICO", sizes=icon_sizes)
         return True
     except Exception as e:
         print(f"Error converting to ICO: {e}")
         return False
 
-def convert_to_icns(jpg_path, icns_path):
-    """Convert JPG to ICNS format for macOS"""
+
+def convert_to_icns(jpg_path: str, icns_path: Path) -> bool:
+    """Convert JPG to ICNS format for macOS."""
     try:
         img = Image.open(jpg_path)
-        # Resize to 1024x1024 (standard size for macOS icons)
-        img = img.resize((1024,1024))
-        img.save(icns_path, format='ICNS')
+        img = img.resize((1024, 1024))
+        img.save(icns_path, format="ICNS")
         return True
     except Exception as e:
         print(f"Error converting to ICNS: {e}")
         return False
 
-def prepare_icon():
-    """Prepare icon files from avatar.jpg"""
-    avatar_path = 'avatar.jpg'
+
+def prepare_icon() -> Path | None:
+    """Prepare icon files from avatar.jpg."""
+    avatar_path = "avatar.jpg"
     if not os.path.exists(avatar_path):
         print("Warning: avatar.jpg not found")
         return None
 
-    # Create static directory if it doesn't exist
-    static_dir = Path('static')
+    static_dir = Path("static")
     static_dir.mkdir(exist_ok=True)
 
     icon_path = None
-    if sys.platform == 'win32':
-        icon_path = static_dir / 'icon.ico'
+    if sys.platform == "win32":
+        icon_path = static_dir / "icon.ico"
         if convert_to_ico(avatar_path, icon_path):
             print(f"Created icon at: {icon_path}")
-    else:  # macOS
-        icon_path = static_dir / 'icon.icns'
+    else:
+        icon_path = static_dir / "icon.icns"
         if convert_to_icns(avatar_path, icon_path):
             print(f"Created icon at: {icon_path}")
 
     return icon_path
 
-def install_requirements():
-    """Install required packages"""
-    subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
 
-def prepare_sensitive_files():
-    """
-    Chuẩn bị các file nhạy cảm bằng cách copy và đổi tên
-    để ẩn mục đích sử dụng
-    """
+# ---------------------------------------------------------------------------
+# Sensitive-file bundling
+# ---------------------------------------------------------------------------
+
+def prepare_sensitive_files() -> list[tuple[str, str]]:
+    """Copy and rename sensitive files so their purpose is obfuscated."""
     sensitive_files = {
-        'driver-service-account.json': 'data1.bin',
-        'driver-service-account.json': 'data2.bin',
-        'accounts.json': 'accounts.json',
-        '.env': '.env'
-        # Thêm các file nhạy cảm khác vào đây
+        "driver-service-account.json": "data1.bin",
+        "accounts.json": "accounts.json",
+        ".env": ".env",
     }
 
-    copied_files = []
+    copied_files: list[tuple[str, str]] = []
 
-    # Tạo thư mục build nếu chưa tồn tại
-    build_dir = Path('build/sensitive')
+    build_dir = Path("build/sensitive")
     build_dir.mkdir(parents=True, exist_ok=True)
 
     for src, dest in sensitive_files.items():
         if os.path.exists(src):
-            # Copy vào thư mục build với tên mới
             dest_path = build_dir / dest
             shutil.copy2(src, dest_path)
-            # Thêm vào danh sách files để bundle
-            copied_files.append((str(dest_path), '.'))
+            copied_files.append((str(dest_path), "."))
             print(f"Processed sensitive file: {src} -> {dest}")
         else:
             print(f"Warning: Sensitive file not found: {src}")
 
     return copied_files
 
-def build_application(show_console=True):
-    """Build the application for current platform"""
-    # Define main file and data files
-    main_file = 'pdf_processor.py'
 
-    # Prepare icon
+# ---------------------------------------------------------------------------
+# Install
+# ---------------------------------------------------------------------------
+
+def install_package() -> None:
+    """Install the project in editable mode with build extras."""
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-e", ".[build]"],
+        check=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
+
+def build_application(show_console: bool = True) -> None:
+    """Build the application for the current platform."""
+    # v5: use the package entry-point module
+    main_file = "src/customs_bot/__main__.py"
+
     icon_path = prepare_icon()
+    sensitive_data_files = prepare_sensitive_files()
 
-    # Process sensitive files
-    sensitive_data_files = prepare_sensitive_files()  # Removed temp_dir parameter
+    data_files: list[tuple[str, str]] = []
 
-    # Collect all required data files
-    data_files = []
+    # Bundle the entire src/customs_bot package so PyInstaller can find it
+    if os.path.isdir("src/customs_bot"):
+        data_files.append(("src/customs_bot", "customs_bot"))
 
-    # Add required directories if they exist
-    required_dirs = [
-        ('templates', 'templates'),
-        ('static', 'static')
-    ]
+    # Legacy bridge: chrome_manager.py is still imported at runtime
+    if os.path.exists("chrome_manager.py"):
+        data_files.append(("chrome_manager.py", "."))
+    if os.path.exists("utils.py"):
+        data_files.append(("utils.py", "."))
 
-    for src, dest in required_dirs:
-        if os.path.exists(src) and os.path.isdir(src):
+    # Static assets
+    for src, dest in [("templates", "templates"), ("static", "static")]:
+        if os.path.isdir(src):
             data_files.append((src, dest))
 
-    # Add .env if exists
-    if os.path.exists('.env'):
-        data_files.append(('.env', '.'))
+    if os.path.exists(".env"):
+        data_files.append((".env", "."))
 
-    # Add sensitive files
     data_files.extend(sensitive_data_files)
 
-    # Basic PyInstaller options
+    # PyInstaller options
     options = [
-        '--onefile',              # Create a single executable
-        '--clean',                # Clean PyInstaller cache
-        '--noconfirm',           # Replace output directory without asking
-        '--name', 'pdf_processor' # Output name
+        "--onefile",
+        "--clean",
+        "--noconfirm",
+        "--name", "customs-bot",
+        # Tell PyInstaller where to find the package
+        "--paths", "src",
     ]
 
-    # Platform specific options
-    if sys.platform == 'win32':
-        options.append('--uac-admin')        # Request admin privileges
+    if sys.platform == "win32":
+        options.append("--uac-admin")
         if icon_path:
-            options.append(f'--icon={icon_path}')
-
-        # Add --noconsole only if show_console is False
+            options.append(f"--icon={icon_path}")
         if not show_console:
-            options.append('--noconsole')
-
-    else:  # macOS
+            options.append("--noconsole")
+    else:
         if icon_path:
-            options.append(f'--icon={icon_path}')
-    # Add data files
+            options.append(f"--icon={icon_path}")
+
+    separator = ";" if sys.platform == "win32" else ":"
     for src, dest in data_files:
-        separator = ';' if sys.platform == 'win32' else ':'
-        options.append(f'--add-data={src}{separator}{dest}')
+        options.append(f"--add-data={src}{separator}{dest}")
 
-    # Remove None values
-    options = [opt for opt in options if opt is not None]
+    command = ["pyinstaller"] + options + [main_file]
 
-    # Build command
-    command = ['pyinstaller'] + options + [main_file]
+    print("\nBuilding with command:", " ".join(command))
 
-    # Print command for debugging
-    print("\nBuilding with command:", ' '.join(command))
+    Path("dist").mkdir(exist_ok=True)
 
-    # Create dist directory if it doesn't exist
-    dist_dir = Path('dist')
-    dist_dir.mkdir(exist_ok=True)
-
-    # Run PyInstaller
     try:
         subprocess.run(command, check=True)
-        output_file = 'pdf_processor.exe' if sys.platform == 'win32' else 'pdf_processor'
-        console_status = "với console" if show_console else "không có console"
-        print(f"\nBuild successful! Output file: dist/{output_file} ({console_status})")
+        output_file = "customs-bot.exe" if sys.platform == "win32" else "customs-bot"
+        console_status = "with console" if show_console else "without console"
+        print(f"\nBuild successful! Output: dist/{output_file} ({console_status})")
     except subprocess.CalledProcessError as e:
         print(f"\nBuild failed with error: {e}")
         sys.exit(1)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Build PDF Processor application')
-    parser.add_argument('--no-console', action='store_true',
-                      help='Hide console window in Windows build')
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Build customs-receipt-bot executable")
+    parser.add_argument(
+        "--no-console",
+        action="store_true",
+        help="Hide console window in Windows build",
+    )
     args = parser.parse_args()
 
-    # Install Pillow if not already installed
-    # subprocess.run([sys.executable, '-m', 'pip', 'install', 'Pillow'])
-
-    print("Installing requirements...")
-    install_requirements()
+    print("Installing package...")
+    install_package()
 
     print("\nBuilding application...")
     build_application(show_console=not args.no_console)

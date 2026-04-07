@@ -1,0 +1,20 @@
+{
+  "so_ct": "202510662874",
+  "date": "17/09/2025",
+  "tax_number": "0202156144",
+  "customs_number": "307773856850",
+  "partner_invoice_name": "CÔNG TY TNHH CÔNG NGHỆ NĂNG LƯỢNG MỚI AUTEL VIỆT NAM",
+  "line_items": [
+    {
+      "container_no": "ZCSU7595256",
+      "label": "Container 40 feet hàng khô",
+      "unit": "Đồng/Container",
+      "unit_price": 500000,
+      "quantity": 1,
+      "amount": 500000
+    }
+  ],
+  "jobId": "",
+  "hawb": "",
+  "nguoi_khai": ""
+}

@@ -14,6 +14,7 @@ dist
 data/
 downloaded_pdfs/
 training_captchas/
+CLAUDE.md
 
 # Google API credentials
  driver-key.json

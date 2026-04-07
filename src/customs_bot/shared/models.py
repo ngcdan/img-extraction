@@ -17,6 +17,19 @@ class Account(BaseModel):
     password: str = Field(min_length=1)
 
 
+class LineItem(BaseModel):
+    """Dòng chi tiết biên lai (container/vận đơn)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    container_no: str
+    label: str
+    unit: str
+    unit_price: int
+    quantity: float
+    amount: int
+
+
 class Invoice(BaseModel):
     """Header tờ khai parsed từ PDF đầu vào."""
 
@@ -26,6 +39,7 @@ class Invoice(BaseModel):
     tax_code: str
     source_file: str
     total_amount: float | None = None
+    line_items: list[LineItem] = Field(default_factory=list)
 
 
 class ReceiptStatus(str, Enum):

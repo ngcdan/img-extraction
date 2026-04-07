@@ -5,8 +5,7 @@
 Phase 2 ban đầu giả định có thể bỏ Selenium download bằng cách: Selenium login →
 extract cookies → httpx GET PDF. Sau khi đọc code thật:
 
-- API client (`custom_api_client.py`) gọi bên thứ 3 (beelogistics.cloud) bằng API key
-  → KHÔNG cần cookies từ Selenium.
+- API client (FMS) → KHÔNG cần cookies từ Selenium.
 - Receipt download (`receipt_fetcher.py`) mở `HoaDonViewer.aspx` rồi dùng Chrome DevTools
   `Page.printToPDF` để **render trang ASPX → PDF**. Đây có thể là viewer page chứ không
   phải direct PDF binary.
@@ -18,8 +17,9 @@ phải giữ Selenium cho phần download (Phase 2 reduced scope).
 ## Cần chuẩn bị
 
 1. Account thật trên `thuphi.haiphong.gov.vn` (đã trong `accounts.json`)
-2. 1 mã `mhd` (drive_link) thật từ kết quả API beelogistics. Cách lấy:
-   - Chạy `python custom_api_client.py` với customs_number thật, copy `drive_link` từ output
+2. 1 mã `mhd` (drive_link) thật. Cách lấy:
+   - Gọi FMS API với customs_number thật (xem `FmsApiClient` — TODO: chưa implement)
+   - Hoặc scrape gov site sau khi login
    - Hoặc tìm trong log run cũ
 3. Chrome đã đóng hết (kill mọi instance)
 

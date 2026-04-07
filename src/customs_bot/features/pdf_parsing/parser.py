@@ -87,7 +87,7 @@ def _extract_header(text: str) -> dict:
             and lines[i + 1].startswith("Số:")
         ):
             so_ct = lines[i + 1].replace("Số:", "").strip()
-            if so_ct.isdigit() and so_ct.startswith("2025"):
+            if so_ct.isdigit() and len(so_ct) >= 4:
                 result["so_ct"] = so_ct
 
     for i, line in enumerate(lines):

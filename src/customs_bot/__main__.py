@@ -1,10 +1,6 @@
-"""CLI entry point. Phase 0: stub only."""
+"""CLI entry point."""
 
-
-def main() -> int:
-    print("customs_bot v5 skeleton — implementation pending (Phase 1+)")
-    return 0
-
+from customs_bot.cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

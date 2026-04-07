@@ -1,32 +1,41 @@
-"""HTTP client tra cứu biên lai qua API Beelogistics."""
+"""HTTP client tra cứu biên lai qua FMS API.
+
+TODO: Implement FmsApiClient — chờ thông tin chi tiết về FMS API:
+    - Endpoint URL (base URL + path)
+    - Auth method (API key header / Bearer token / Basic auth / ...)
+    - Request format: HTTP method, payload shape (input là customs_numbers?)
+    - Response format: field nào chứa mhd (drive_link)?
+    - Error semantics: status codes, error envelope shape
+
+Khi có thông tin trên, implement theo pattern Protocol-based để testable
+qua respx mock (xem `tests/test_api_client.py`).
+"""
 
 from __future__ import annotations
 
 import os
-from typing import Any
 
 import httpx
-from loguru import logger
 
 from customs_bot.shared.models import ReceiptSearchResult
 
-DEFAULT_BASE_URL = "https://beelogistics.cloud/api"
-RESOURCE_ENDPOINT = "/resource"
-RESOURCE_NAME = "resource:custom-ie-api"
 DEFAULT_TIMEOUT = 30.0
 
 
-class BeelogisticsApiError(Exception):
-    """Lỗi khi gọi API Beelogistics."""
+class FmsApiError(Exception):
+    """Lỗi khi gọi FMS API."""
 
 
-class BeelogisticsApiClient:
-    """Client httpx cho API tra cứu biên lai Beelogistics."""
+class FmsApiClient:
+    """Client httpx cho FMS API tra cứu biên lai.
+
+    TODO: Thay stub này bằng implementation thật khi có spec FMS API.
+    """
 
     def __init__(
         self,
         api_key: str,
-        base_url: str = DEFAULT_BASE_URL,
+        base_url: str = "",
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
     ) -> None:
@@ -39,100 +48,38 @@ class BeelogisticsApiClient:
         self._owns_client = http_client is None
 
     @classmethod
-    def from_env(cls) -> BeelogisticsApiClient:
-        api_key = os.environ.get("DATATP_API_KEY")
+    def from_env(cls) -> FmsApiClient:
+        """Đọc FMS_API_KEY (và optional FMS_API_BASE_URL) từ environment."""
+        api_key = os.environ.get("FMS_API_KEY")
         if not api_key:
             raise RuntimeError(
-                "DATATP_API_KEY chưa được cấu hình trong environment variables"
+                "FMS_API_KEY chưa được cấu hình trong environment variables"
             )
-        return cls(api_key=api_key)
+        base_url = os.environ.get("FMS_API_BASE_URL", "")
+        return cls(api_key=api_key, base_url=base_url)
 
     def close(self) -> None:
         if self._owns_client:
             self._http.close()
 
-    def __enter__(self) -> BeelogisticsApiClient:
+    def __enter__(self) -> FmsApiClient:
         return self
 
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Content-Type": "application/json",
-            "DataTP-Authorization": self.api_key,
-        }
-
     def search(self, customs_numbers: list[str]) -> list[ReceiptSearchResult]:
-        """Gửi danh sách số tờ khai, trả về danh sách kết quả đã typed."""
-        url = f"{self.base_url}{RESOURCE_ENDPOINT}"
-        body = {
-            "resourceName": RESOURCE_NAME,
-            "customsNumbers": customs_numbers,
-        }
-        try:
-            response = self._http.post(
-                url, json=body, headers=self._headers(), timeout=self.timeout
-            )
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise BeelogisticsApiError(
-                f"API trả về status {exc.response.status_code}: {exc.response.text[:200]}"
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise BeelogisticsApiError(f"Lỗi HTTP khi gọi API: {exc}") from exc
+        """Gửi danh sách số tờ khai, trả về danh sách kết quả đã typed.
 
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise BeelogisticsApiError(f"Response không phải JSON hợp lệ: {exc}") from exc
-
-        return _parse_records(payload)
-
-
-def _parse_records(payload: Any) -> list[ReceiptSearchResult]:
-    if not isinstance(payload, dict):
-        logger.warning("Payload API không phải dict, bỏ qua")
-        return []
-    data = payload.get("data")
-    if not isinstance(data, dict):
-        logger.warning("Thiếu field 'data' trong response API")
-        return []
-    result = data.get("result")
-    if not isinstance(result, dict):
-        logger.warning("Thiếu field 'result' trong data")
-        return []
-    records = result.get("records") or []
-    if not isinstance(records, list):
-        logger.warning("Field 'records' không phải list")
-        return []
-
-    parsed: list[ReceiptSearchResult] = []
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        mhd = record.get("drive_link") or ""
-        customs_no = record.get("customs_no") or ""
-        if not mhd or not customs_no:
-            logger.warning(
-                "Bỏ qua record thiếu drive_link/customs_no: customs_no={}", customs_no or "?"
-            )
-            continue
-        parsed.append(
-            ReceiptSearchResult(
-                customs_number=str(customs_no),
-                mhd=str(mhd),
-                trans_id=_opt_str(record.get("TransID")),
-                hawb=_opt_str(record.get("hawb")),
-                partner_name=_opt_str(record.get("PartnerName3")),
-                raw=record,
-            )
+        TODO: Implement HTTP call sau khi xác nhận FMS API spec:
+            - URL: f"{self.base_url}/<endpoint>"
+            - Method: GET hoặc POST
+            - Headers: tự động thêm auth (API key / Bearer)
+            - Body: payload shape phụ thuộc API (vd {"customs_numbers": [...]})
+            - Parse response → list[ReceiptSearchResult]
+            - Error handling: raise FmsApiError trên HTTP error / parse fail
+        """
+        raise NotImplementedError(
+            "FmsApiClient.search chưa implement — chờ spec FMS API "
+            "(endpoint, auth, request/response shape)"
         )
-    return parsed
-
-
-def _opt_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    s = str(value)
-    return s if s else None

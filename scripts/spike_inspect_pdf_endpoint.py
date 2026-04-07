@@ -10,8 +10,7 @@ CÁCH CHẠY (cần login thủ công 1 lần):
 2. Trong cửa sổ Chrome debug đó, tự login vào https://thuphi.haiphong.gov.vn
    (nhập username/password/captcha bằng tay).
 
-3. Chuẩn bị 1 mã `mhd` (drive_link) thật từ kết quả API beelogistics — bạn có
-   thể lấy bằng cách chạy `python custom_api_client.py` với customs_number thật,
+3. Chuẩn bị 1 mã `mhd` (drive_link) thật — gọi FMS API (TODO: chưa implement)
    hoặc copy từ log run trước.
 
 4. Chạy: source env/bin/activate && python scripts/spike_inspect_pdf_endpoint.py <MHD>
@@ -52,7 +51,7 @@ def attach_to_existing_chrome() -> webdriver.Chrome:
 def main() -> int:
     if len(sys.argv) < 2:
         print("Usage: python scripts/spike_inspect_pdf_endpoint.py <MHD>")
-        print("       (MHD = drive_link value from beelogistics API response)")
+        print("       (MHD = drive_link value from FMS API response)")
         return 2
 
     mhd = sys.argv[1]

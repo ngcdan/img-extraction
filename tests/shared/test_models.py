@@ -59,3 +59,25 @@ def test_batch_result_aggregates():
 def test_batch_result_invariant_violation():
     with pytest.raises(ValidationError):
         BatchResult(total=10, succeeded=5, failed=2, skipped=1)
+
+
+def test_receipt_search_result_valid():
+    from customs_bot.shared.models import ReceiptSearchResult
+    r = ReceiptSearchResult(
+        customs_number="307767153100",
+        mhd="abc123",
+        trans_id="T1",
+        hawb=None,
+        partner_name="ACME",
+        raw={"foo": "bar"},
+    )
+    assert r.mhd == "abc123"
+    assert r.raw["foo"] == "bar"
+
+
+def test_receipt_search_result_rejects_empty_mhd():
+    from customs_bot.shared.models import ReceiptSearchResult
+    with pytest.raises(ValidationError):
+        ReceiptSearchResult(
+            customs_number="x", mhd="", trans_id=None, hawb=None, partner_name=None, raw={}
+        )

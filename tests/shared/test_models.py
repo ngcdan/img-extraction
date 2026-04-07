@@ -7,6 +7,7 @@ from customs_bot.shared.models import (
     Account,
     BatchResult,
     Invoice,
+    LineItem,
     Receipt,
     ReceiptStatus,
 )
@@ -59,6 +60,39 @@ def test_batch_result_aggregates():
 def test_batch_result_invariant_violation():
     with pytest.raises(ValidationError):
         BatchResult(total=10, succeeded=5, failed=2, skipped=1)
+
+
+def test_line_item_valid():
+    item = LineItem(
+        container_no="ZCSU7595256",
+        label="Container 40 feet hàng khô",
+        unit="Đồng/Container",
+        unit_price=500000,
+        quantity=1,
+        amount=500000,
+    )
+    assert item.unit_price == 500000
+
+
+def test_invoice_with_line_items():
+    inv = Invoice(
+        customs_number="12345",
+        registration_date=date(2026, 4, 7),
+        company_name="X",
+        tax_code="Y",
+        source_file="z.pdf",
+        line_items=[
+            LineItem(
+                container_no="C1",
+                label="L",
+                unit="U",
+                unit_price=100,
+                quantity=1,
+                amount=100,
+            )
+        ],
+    )
+    assert len(inv.line_items) == 1
 
 
 def test_receipt_search_result_valid():

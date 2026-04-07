@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from loguru import Logger
 
 _FORMAT = (
     "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
@@ -14,7 +18,7 @@ _FORMAT = (
 )
 
 
-def setup_logging(level: str = "INFO", log_file: Path | None = None):
+def setup_logging(level: str = "INFO", log_file: Path | None = None) -> Logger:
     """Configure loguru sinks. Returns the loguru logger."""
     logger.remove()
     logger.add(lambda msg: print(msg, end=""), level=level, format=_FORMAT, colorize=True)

@@ -136,7 +136,6 @@ Các module phụ trợ:
 - Python **3.10+** (project test với 3.10.10 trên Windows, Python 3 mặc định trên macOS).
 - Google Chrome đã cài (ChromeDriver tự động tải qua `webdriver-manager`).
 - macOS hoặc Windows. Linux có thể chạy nhưng chưa được test.
-- (Tuỳ chọn) ODBC driver hệ thống nếu sử dụng `pyodbc` (`brew install unixodbc` trên macOS).
 
 ## Cài đặt
 
@@ -254,7 +253,6 @@ img-extraction/
 
 - **Chrome không mở:** đóng toàn bộ Chrome đang chạy, xóa profile debug nếu treo.
 - **Không tìm thấy `driver-service-account.json`:** tạo Service Account theo bước Cấu hình ở trên.
-- **`pyodbc` build fail trên macOS:** `brew install unixodbc` rồi `pip install pyodbc` lại.
 - **Selenium timeout/login fail:** kiểm tra tài khoản trong `accounts.json` còn hợp lệ, thử rotate.
 - **Port 9222 bị chiếm:** kill Chrome instance đang dùng debug port.
 

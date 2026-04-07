@@ -52,7 +52,7 @@ class SeleniumPdfDownloader:
         logger.debug("Opening viewer: {}", url)
 
         original = self._driver.current_window_handle
-        self._driver.execute_script(f"window.open('{url}', '_blank');")
+        self._driver.execute_script("window.open(arguments[0], '_blank');", url)
         time.sleep(0.5)
 
         new_handles = [h for h in self._driver.window_handles if h != original]
